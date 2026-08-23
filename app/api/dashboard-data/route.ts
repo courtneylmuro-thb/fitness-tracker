@@ -1,0 +1,33 @@
+import { NextResponse } from "next/server";
+import { getSupabaseAdmin } from "@/lib/supabase";
+
+export async function GET() {
+  const supabase = getSupabaseAdmin();
+  const today = new Date().toISOString().slice(0, 10);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+
+  const [metricsRes, foodTodayRes, bodyRes, workoutsRes, settingsRes, vacationRes] =
+    await Promise.all([
+      supabase.from("daily_metrics").select("*").gte("date", thirtyDaysAgo).order("date"),
+      supabase.from("food_logs").select("*").gte("logged_at", `${today}T00:00:00`).order("logged_at"),
+      supabase.from("body_composition").select("*").order("date", { ascending: false }).limit(12),
+      supabase.from("workouts").select("*").gte("date", thirtyDaysAgo).order("date", { ascending: false }),
+      supabase.from("settings").select("*").eq("key", "daily_calorie_budget").single(),
+      supabase.from("vacation_days").select("*").eq("date", today).maybeSingle(),
+    ]);
+
+  const foodToday = foodTodayRes.data || [];
+  const caloriesToday = foodToday.reduce((sum, f) => sum + (Number(f.estimated_calories) || 0), 0);
+  const todayMetrics = (metricsRes.data || []).find((m) => m.date === today);
+
+  return NextResponse.json({
+    budget: settingsRes.data?.value ?? 2000,
+    caloriesToday,
+    burnedToday: todayMetrics?.total_calories_burned ?? null,
+    isVacationToday: !!vacationRes.data,
+    metrics: metricsRes.data || [],
+    foodToday,
+    body: (bodyRes.data || []).slice().reverse(),
+    workouts: workoutsRes.data || [],
+  });
+}

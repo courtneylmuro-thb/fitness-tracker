@@ -1,0 +1,156 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #fafafa;
+  color: #1d1d1f;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
+
+.container {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 20px 16px 100px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.card h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #86868b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 12px;
+}
+
+.greeting {
+  font-size: 26px;
+  font-weight: 700;
+  margin: 8px 0 4px;
+}
+
+.subtle {
+  color: #86868b;
+  font-size: 14px;
+}
+
+.nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  background: #fff;
+  border-top: 1px solid #e5e5e7;
+  padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+}
+
+.nav a {
+  flex: 1;
+  text-align: center;
+  text-decoration: none;
+  color: #86868b;
+  font-size: 12px;
+  padding: 6px 0;
+}
+
+.nav a.active {
+  color: #007aff;
+  font-weight: 600;
+}
+
+.btn {
+  background: #1d1d1f;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 14px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  width: 100%;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+.btn-secondary {
+  background: #f2f2f7;
+  color: #1d1d1f;
+}
+
+textarea,
+input[type="text"] {
+  width: 100%;
+  border: 1px solid #e5e5e7;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 16px;
+  font-family: inherit;
+  resize: vertical;
+  margin-bottom: 12px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+}
+
+.pill {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pill-green {
+  background: rgba(52, 199, 89, 0.12);
+  color: #248a3d;
+}
+
+.pill-orange {
+  background: rgba(255, 149, 0, 0.12);
+  color: #b3690a;
+}
+
+.pill-blue {
+  background: rgba(0, 122, 255, 0.12);
+  color: #0062cc;
+}
+
+.food-entry {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f2f2f7;
+  font-size: 14px;
+}
+
+.food-entry:last-child {
+  border-bottom: none;
+}
+
+.empty {
+  color: #86868b;
+  font-size: 14px;
+  text-align: center;
+  padding: 12px 0;
+}

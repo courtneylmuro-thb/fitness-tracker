@@ -6,10 +6,8 @@ import { useEffect, useState } from "react";
 
 const links = [
   { href: "/", label: "Dashboard" },
-  { href: "/log", label: "Log Food" },
-  { href: "/workout", label: "Log Workout" },
+  { href: "/log", label: "Log" },
   { href: "/scan", label: "Body Scan" },
-  { href: "/backgrounds", label: "Backgrounds" },
 ];
 
 export default function NavBar() {

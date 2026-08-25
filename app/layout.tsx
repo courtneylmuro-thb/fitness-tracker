@@ -3,18 +3,18 @@ import "./globals.css";
 import NavBar from "./nav-bar";
 
 export const metadata: Metadata = {
-  title: "Fitness Tracker",
+  title: "Fit",
   description: "Courtney's personal fitness & nutrition tracker",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Fitness",
+    title: "Fit",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#fafafa",
+  themeColor: "#F9F9F7",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import NavBar from "./nav-bar";
 import PullToRefresh from "./pull-to-refresh";
+import QuoteModal from "./quote-modal";
 
 export const metadata: Metadata = {
   title: "Fit",
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <PullToRefresh />
+        <QuoteModal />
         {children}
         <NavBar />
       </body>

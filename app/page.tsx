@@ -41,7 +41,7 @@ function CalorieRing({ eaten, budget }: { eaten: number; budget: number }) {
           cy="90"
           r={radius}
           fill="none"
-          stroke={over ? "#e16fa9" : "#3c6364"}
+          stroke={over ? "#c0392b" : "#e16fa9"}
           strokeWidth="14"
           strokeDasharray={circumference}
           strokeDashoffset={offset}
@@ -56,6 +56,35 @@ function CalorieRing({ eaten, budget }: { eaten: number; budget: number }) {
         </text>
       </svg>
     </div>
+  );
+}
+
+function RotatingBackground() {
+  const [images, setImages] = useState<string[]>([]);
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/backgrounds")
+      .then((r) => r.json())
+      .then((d) => setImages(d.images || []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (images.length < 2) return;
+    const id = setInterval(() => {
+      setIndex((i) => (i + 1) % images.length);
+    }, 8000);
+    return () => clearInterval(id);
+  }, [images]);
+
+  if (images.length === 0) return null;
+
+  return (
+    <>
+      <div className="bg-photo-layer" style={{ backgroundImage: `url(${images[index]})` }} />
+      <div className="bg-photo-overlay" />
+    </>
   );
 }
 
@@ -88,6 +117,7 @@ export default function Dashboard() {
 
   return (
     <div className="container">
+      <RotatingBackground />
       <div className="greeting">{greeting}</div>
       <div className="subtle">{dateStr}</div>
 
@@ -135,7 +165,7 @@ export default function Dashboard() {
             <XAxis dataKey="date" fontSize={11} stroke="#8a8680" />
             <YAxis fontSize={11} stroke="#8a8680" />
             <Tooltip />
-            <Bar dataKey="burned" fill="#3c6364" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="burned" fill="#e16fa9" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

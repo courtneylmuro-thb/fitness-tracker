@@ -42,6 +42,7 @@ a {
 .card {
   background: #fff;
   border: 1px solid var(--warm-gray);
+  border-left: 4px solid var(--teal);
   border-radius: 18px;
   box-shadow: 2px 4px 14px rgba(60, 99, 100, 0.06);
   padding: 22px 20px;

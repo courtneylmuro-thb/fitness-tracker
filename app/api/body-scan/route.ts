@@ -4,12 +4,12 @@ import { estimateBodyScan } from "@/lib/anthropic";
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64, date } = await req.json();
+    const { imageBase64, mediaType, date } = await req.json();
     if (!imageBase64) {
       return NextResponse.json({ error: "Provide a photo of the InBody sheet" }, { status: 400 });
     }
 
-    const reading = await estimateBodyScan({ imageBase64 });
+    const reading = await estimateBodyScan({ imageBase64, mediaType });
     const supabase = getSupabaseAdmin();
 
     const { data, error } = await supabase

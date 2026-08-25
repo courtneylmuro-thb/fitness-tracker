@@ -35,7 +35,7 @@ a {
 .container {
   max-width: 480px;
   margin: 0 auto;
-  padding: 24px 64px 48px 16px;
+  padding: 24px 16px 48px;
   position: relative;
 }
 
@@ -198,6 +198,38 @@ a {
   background: rgba(225, 111, 169, 0.08);
 }
 
+/* Motivational quote modal */
+
+.quote-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 26, 26, 0.55);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.quote-card {
+  background: #fff;
+  border-radius: 18px;
+  padding: 32px 26px;
+  max-width: 360px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 2px 10px 34px rgba(0, 0, 0, 0.22);
+}
+
+.quote-text {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--near-black);
+  line-height: 1.35;
+  margin-bottom: 20px;
+}
+
 .btn {
   background: var(--coral);
   color: #fff;
@@ -289,20 +321,4 @@ input[type="date"] {
   font-size: 13px;
   text-align: center;
   padding: 14px 0;
-}
-
-.bg-photo-layer {
-  position: fixed;
-  inset: 0;
-  background-size: cover;
-  background-position: center;
-  transition: background-image 0.8s ease-in-out;
-  z-index: -2;
-}
-
-.bg-photo-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(249, 249, 247, 0.8);
-  z-index: -1;
 }

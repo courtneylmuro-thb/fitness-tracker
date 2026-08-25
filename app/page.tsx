@@ -59,35 +59,6 @@ function CalorieRing({ eaten, budget }: { eaten: number; budget: number }) {
   );
 }
 
-function RotatingBackground() {
-  const [images, setImages] = useState<string[]>([]);
-  const [index, setIndex] = useState(0);
-
-  useEffect(() => {
-    fetch("/api/backgrounds")
-      .then((r) => r.json())
-      .then((d) => setImages(d.images || []))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (images.length < 2) return;
-    const id = setInterval(() => {
-      setIndex((i) => (i + 1) % images.length);
-    }, 8000);
-    return () => clearInterval(id);
-  }, [images]);
-
-  if (images.length === 0) return null;
-
-  return (
-    <>
-      <div className="bg-photo-layer" style={{ backgroundImage: `url(${images[index]})` }} />
-      <div className="bg-photo-overlay" />
-    </>
-  );
-}
-
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +88,6 @@ export default function Dashboard() {
 
   return (
     <div className="container">
-      <RotatingBackground />
       <div className="greeting">{greeting}</div>
       <div className="subtle">{dateStr}</div>
 

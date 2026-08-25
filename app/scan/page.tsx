@@ -11,6 +11,7 @@ type Reading = {
 };
 
 export default function ScanPage() {
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Reading | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +26,7 @@ export default function ScanPage() {
       const res = await fetch("/api/body-scan", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64 }),
+        body: JSON.stringify({ imageBase64: base64, mediaType: file.type, date }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to read scan");
@@ -45,6 +46,7 @@ export default function ScanPage() {
       </div>
 
       <div className="card">
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <button className="btn" disabled={loading} onClick={() => fileInputRef.current?.click()}>
           {loading ? "Reading scan…" : "📷 Upload InBody photo"}
         </button>
@@ -62,7 +64,7 @@ export default function ScanPage() {
       </div>
 
       {error && (
-        <div className="card" style={{ color: "#FF3B30" }}>
+        <div className="card" style={{ color: "#c0392b" }}>
           {error}
         </div>
       )}

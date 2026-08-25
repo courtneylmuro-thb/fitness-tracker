@@ -2,19 +2,23 @@
 
 import { useRef, useState } from "react";
 
-type Estimate = {
-  description: string;
-  estimated_calories: number;
-  protein_g: number;
-  carbs_g: number;
-  fat_g: number;
+type LogResult = {
+  type: "food" | "workout";
+  description?: string;
+  estimated_calories?: number;
+  protein_g?: number;
+  carbs_g?: number;
+  fat_g?: number;
+  workout_type?: string;
+  duration_min?: number | null;
 };
 
 export default function LogPage() {
   const [text, setText] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [listening, setListening] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<Estimate | null>(null);
+  const [result, setResult] = useState<LogResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -50,13 +54,13 @@ export default function LogPage() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("/api/food-log", {
+      const res = await fetch("/api/log-entry", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ description: text }),
+        body: JSON.stringify({ text, date }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to log food");
+      if (!res.ok) throw new Error(data.error || "Couldn't log that");
       setResult(data);
       setText("");
     } catch (e: any) {
@@ -71,14 +75,14 @@ export default function LogPage() {
     setError(null);
     setResult(null);
     try {
-      const base64 = await fileToBase64(file);
-      const res = await fetch("/api/food-log", {
+      const imageBase64 = await fileToBase64(file);
+      const res = await fetch("/api/log-entry", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, description: text || undefined }),
+        body: JSON.stringify({ imageBase64, mediaType: file.type, text: text || undefined, date }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to log food");
+      if (!res.ok) throw new Error(data.error || "Couldn't log that");
       setResult(data);
       setText("");
     } catch (e: any) {
@@ -90,18 +94,19 @@ export default function LogPage() {
 
   return (
     <div className="container">
-      <div className="greeting">Log Food</div>
+      <div className="greeting">Log</div>
       <div className="subtle" style={{ marginBottom: 16 }}>
-        Say it, type it, or snap a photo -- doesn't need to be precise.
+        Food or workout, say it, type it, or snap a photo -- doesn't need to be precise.
       </div>
 
       <div className="card">
         <textarea
           rows={3}
-          placeholder="e.g. two eggs, toast with butter, and a coffee with oat milk"
+          placeholder='e.g. "two eggs and toast" or "yoga sixty minutes"'
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <div className="row" style={{ marginBottom: 12 }}>
           <button className="btn btn-secondary" onClick={listening ? stopListening : startListening}>
             {listening ? "Stop listening" : "🎤 Speak"}
@@ -122,24 +127,32 @@ export default function LogPage() {
           }}
         />
         <button className="btn" disabled={loading || !text.trim()} onClick={submitText}>
-          {loading ? "Estimating…" : "Log it"}
+          {loading ? "Logging…" : "Log it"}
         </button>
       </div>
 
       {error && (
-        <div className="card" style={{ color: "#FF3B30" }}>
+        <div className="card" style={{ color: "#c0392b" }}>
           {error}
         </div>
       )}
 
-      {result && (
+      {result && result.type === "food" && (
         <div className="card">
-          <h2>Logged</h2>
+          <h2>Logged food</h2>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>{result.description}</div>
           <div className="subtle">
-            {Math.round(result.estimated_calories)} cal · {Math.round(result.protein_g)}g protein ·{" "}
-            {Math.round(result.carbs_g)}g carbs · {Math.round(result.fat_g)}g fat
+            {Math.round(result.estimated_calories ?? 0)} cal · {Math.round(result.protein_g ?? 0)}g protein ·{" "}
+            {Math.round(result.carbs_g ?? 0)}g carbs · {Math.round(result.fat_g ?? 0)}g fat
           </div>
+        </div>
+      )}
+
+      {result && result.type === "workout" && (
+        <div className="card">
+          <h2>Logged workout</h2>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>{result.workout_type}</div>
+          <div className="subtle">{result.duration_min ? `${result.duration_min} min` : "No duration given"}</div>
         </div>
       )}
     </div>

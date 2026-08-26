@@ -13,9 +13,17 @@ type LogResult = {
   duration_min?: number | null;
 };
 
+function localDateStr(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export default function LogPage() {
   const [text, setText] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => localDateStr());
   const [listening, setListening] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<LogResult | null>(null);

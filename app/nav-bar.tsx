@@ -8,6 +8,7 @@ const links = [
   { href: "/", label: "Dashboard" },
   { href: "/log", label: "Log" },
   { href: "/scan", label: "Body Scan" },
+  { href: "/backgrounds", label: "Backgrounds" },
 ];
 
 export default function NavBar() {

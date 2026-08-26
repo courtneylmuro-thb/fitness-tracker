@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 const QUOTES = [
@@ -25,16 +26,33 @@ const QUOTES = [
 
 export default function QuoteModal() {
   const [quote, setQuote] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<string | null>(null);
 
   useEffect(() => {
     setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]);
+    fetch("/api/backgrounds")
+      .then((r) => r.json())
+      .then((d) => {
+        const images = d.images || [];
+        if (images.length > 0) {
+          setPhoto(images[Math.floor(Math.random() * images.length)]);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   if (!quote) return null;
 
   return (
-    <div className="quote-overlay" onClick={() => setQuote(null)}>
-      <div className="quote-card" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="quote-overlay"
+      style={photo ? { backgroundImage: `url(${photo})` } : undefined}
+    >
+      <Link href="/backgrounds" className="quote-upload-btn" aria-label="Upload a photo">
+        📷
+      </Link>
+      <div className="quote-scrim" />
+      <div className="quote-content">
         <div className="quote-text">"{quote}"</div>
         <button className="btn" onClick={() => setQuote(null)}>
           Let's go

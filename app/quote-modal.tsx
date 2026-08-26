@@ -48,7 +48,12 @@ export default function QuoteModal() {
       className="quote-overlay"
       style={photo ? { backgroundImage: `url(${photo})` } : undefined}
     >
-      <Link href="/backgrounds" className="quote-upload-btn" aria-label="Upload a photo">
+      <Link
+        href="/backgrounds"
+        className="quote-upload-btn"
+        aria-label="Upload a photo"
+        onClick={() => setQuote(null)}
+      >
         📷
       </Link>
       <div className="quote-scrim" />

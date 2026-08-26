@@ -35,23 +35,23 @@ function CalorieRing({ eaten, budget }: { eaten: number; budget: number }) {
   return (
     <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
       <svg width="180" height="180" viewBox="0 0 180 180">
-        <circle cx="90" cy="90" r={radius} fill="none" stroke="#f0ede8" strokeWidth="14" />
+        <circle cx="90" cy="90" r={radius} fill="none" stroke="#f2f2f7" strokeWidth="14" />
         <circle
           cx="90"
           cy="90"
           r={radius}
           fill="none"
-          stroke={over ? "#c0392b" : "#e16fa9"}
+          stroke={over ? "#FF3B30" : "#34C759"}
           strokeWidth="14"
           strokeDasharray={circumference}
           strokeDashoffset={offset}
           strokeLinecap="round"
           transform="rotate(-90 90 90)"
         />
-        <text x="90" y="84" textAnchor="middle" fontSize="28" fontWeight="700" fontFamily="'Playfair Display', Georgia, serif" fill="#1a1a1a">
+        <text x="90" y="84" textAnchor="middle" fontSize="28" fontWeight="700" fill="#1d1d1f">
           {Math.round(eaten)}
         </text>
-        <text x="90" y="106" textAnchor="middle" fontSize="12" fontFamily="Montserrat, sans-serif" fill="#8a8680">
+        <text x="90" y="106" textAnchor="middle" fontSize="13" fill="#86868b">
           of {budget} cal
         </text>
       </svg>
@@ -64,7 +64,16 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/dashboard-data")
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    const localDate = `${y}-${m}-${d}`;
+    const dayStart = new Date(y, now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+    const dayEnd = new Date(y, now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+    fetch(
+      `/api/dashboard-data?date=${localDate}&dayStart=${encodeURIComponent(dayStart)}&dayEnd=${encodeURIComponent(dayEnd)}`
+    )
       .then((r) => r.json())
       .then(setData)
       .catch((e) => setError(String(e)));
@@ -92,7 +101,7 @@ export default function Dashboard() {
       <div className="subtle">{dateStr}</div>
 
       {data?.isVacationToday && (
-        <div className="card" style={{ background: "#f9f7f4" }}>
+        <div className="card" style={{ background: "#eaf6ec" }}>
           <span className="pill pill-green">On vacation</span> — no pressure today.
         </div>
       )}
@@ -105,11 +114,11 @@ export default function Dashboard() {
         <div className="row" style={{ justifyContent: "center", gap: 24, marginTop: 8 }}>
           <div style={{ textAlign: "center" }}>
             <div className="subtle">Burned</div>
-            <div style={{ fontWeight: 700, fontFamily: "'Playfair Display', Georgia, serif" }}>{data?.burnedToday ? Math.round(data.burnedToday) : "—"}</div>
+            <div style={{ fontWeight: 700 }}>{data?.burnedToday ? Math.round(data.burnedToday) : "—"}</div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div className="subtle">Net</div>
-            <div style={{ fontWeight: 700, fontFamily: "'Playfair Display', Georgia, serif" }}>
+            <div style={{ fontWeight: 700 }}>
               {data?.burnedToday ? Math.round((data.caloriesToday ?? 0) - data.burnedToday) : "—"}
             </div>
           </div>
@@ -131,11 +140,11 @@ export default function Dashboard() {
         <h2>Calories Burned — Last 14 Days</h2>
         <ResponsiveContainer width="100%" height={180}>
           <BarChart data={inVsBurned}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" />
-            <XAxis dataKey="date" fontSize={11} stroke="#8a8680" />
-            <YAxis fontSize={11} stroke="#8a8680" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#f2f2f7" />
+            <XAxis dataKey="date" fontSize={11} stroke="#86868b" />
+            <YAxis fontSize={11} stroke="#86868b" />
             <Tooltip />
-            <Bar dataKey="burned" fill="#e16fa9" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="burned" fill="#007AFF" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -147,13 +156,13 @@ export default function Dashboard() {
         ) : (
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={bodyTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" />
-              <XAxis dataKey="date" fontSize={11} stroke="#8a8680" />
-              <YAxis fontSize={11} stroke="#8a8680" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#f2f2f7" />
+              <XAxis dataKey="date" fontSize={11} stroke="#86868b" />
+              <YAxis fontSize={11} stroke="#86868b" />
               <Tooltip />
-              <Legend wrapperStyle={{ fontSize: 12, fontFamily: "Montserrat, sans-serif" }} />
-              <Line type="monotone" dataKey="bodyFat" name="Body fat %" stroke="#e16fa9" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="muscle" name="Skeletal muscle (lb)" stroke="#3c6364" strokeWidth={2} dot={false} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Line type="monotone" dataKey="bodyFat" name="Body fat %" stroke="#FF9500" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="muscle" name="Skeletal muscle (lb)" stroke="#34C759" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         )}

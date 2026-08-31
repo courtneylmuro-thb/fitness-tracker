@@ -59,32 +59,64 @@ function CalorieRing({ eaten, budget }: { eaten: number; budget: number }) {
   );
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function localDateKey(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function dayParams(d: Date) {
+  const localDate = localDateKey(d);
+  const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).toISOString();
+  const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).toISOString();
+  return { localDate, dayStart, dayEnd };
+}
+
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [chartRange, setChartRange] = useState<"week" | "month">("week");
+
+  const now = new Date();
+  const isToday = localDateKey(selectedDate) === localDateKey(now);
 
   useEffect(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    const localDate = `${y}-${m}-${d}`;
-    const dayStart = new Date(y, now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
-    const dayEnd = new Date(y, now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+    const { localDate, dayStart, dayEnd } = dayParams(selectedDate);
     fetch(
       `/api/dashboard-data?date=${localDate}&dayStart=${encodeURIComponent(dayStart)}&dayEnd=${encodeURIComponent(dayEnd)}`
     )
       .then((r) => r.json())
       .then(setData)
       .catch((e) => setError(String(e)));
-  }, []);
+  }, [selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()]);
 
-  const today = new Date();
-  const dateStr = today.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-  const hour = today.getHours();
+  function goPrevDay() {
+    setSelectedDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1));
+  }
+
+  function goNextDay() {
+    setSelectedDate((d) => {
+      const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+      const todayOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return next > todayOnly ? d : next;
+    });
+  }
+
+  function jumpToDate(value: string) {
+    if (!value) return;
+    const [y, m, d] = value.split("-").map(Number);
+    setSelectedDate(new Date(y, m - 1, d));
+  }
+
+  const dateStr = selectedDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening.";
 
-  const inVsBurned = (data?.metrics || []).slice(-14).map((m) => ({
+  const rangeDays = chartRange === "week" ? 7 : 30;
+  const inVsBurned = (data?.metrics || []).slice(-rangeDays).map((m) => ({
     date: m.date.slice(5),
     burned: m.total_calories_burned ?? 0,
   }));
@@ -97,8 +129,57 @@ export default function Dashboard() {
 
   return (
     <div className="container">
-      <div className="greeting">{greeting}</div>
-      <div className="subtle">{dateStr}</div>
+      <div className="row" style={{ justifyContent: "center", alignItems: "center", gap: 14, marginBottom: 4 }}>
+        <button
+          aria-label="Previous day"
+          onClick={goPrevDay}
+          style={{
+            border: "none",
+            background: "transparent",
+            fontSize: 22,
+            color: "#3c6364",
+            cursor: "pointer",
+            padding: "4px 8px",
+          }}
+        >
+          ‹
+        </button>
+        <div style={{ textAlign: "center" }}>
+          <div className="greeting">{isToday ? greeting : "Looking back."}</div>
+          <label style={{ display: "inline-block", cursor: "pointer", position: "relative" }}>
+            <span className="subtle">{isToday ? `Today, ${dateStr}` : dateStr}</span>
+            <input
+              type="date"
+              value={localDateKey(selectedDate)}
+              max={localDateKey(now)}
+              onChange={(e) => jumpToDate(e.target.value)}
+              style={{
+                position: "absolute",
+                inset: 0,
+                opacity: 0,
+                width: "100%",
+                height: "100%",
+                cursor: "pointer",
+              }}
+            />
+          </label>
+        </div>
+        <button
+          aria-label="Next day"
+          onClick={goNextDay}
+          disabled={isToday}
+          style={{
+            border: "none",
+            background: "transparent",
+            fontSize: 22,
+            color: isToday ? "#c8c5be" : "#3c6364",
+            cursor: isToday ? "default" : "pointer",
+            padding: "4px 8px",
+          }}
+        >
+          ›
+        </button>
+      </div>
 
       {data?.isVacationToday && (
         <div className="card" style={{ background: "#eaf6ec" }}>
@@ -109,7 +190,7 @@ export default function Dashboard() {
       {error && <div className="card">Couldn't load data yet: {error}</div>}
 
       <div className="card">
-        <h2>Today's Calories</h2>
+        <h2>{isToday ? "Today's Calories" : "Calories"}</h2>
         <CalorieRing eaten={data?.caloriesToday ?? 0} budget={data?.budget ?? 2000} />
         <div className="row" style={{ justifyContent: "center", gap: 24, marginTop: 8 }}>
           <div style={{ textAlign: "center" }}>
@@ -126,8 +207,8 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
-        <h2>Today's Food</h2>
-        {(data?.foodToday?.length ?? 0) === 0 && <div className="empty">Nothing logged yet today.</div>}
+        <h2>{isToday ? "Today's Food" : "Food logged"}</h2>
+        {(data?.foodToday?.length ?? 0) === 0 && <div className="empty">Nothing logged {isToday ? "yet today" : "that day"}.</div>}
         {data?.foodToday.map((f) => (
           <div key={f.id} className="food-entry">
             <span>{f.description}</span>
@@ -137,7 +218,41 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
-        <h2>Calories Burned — Last 14 Days</h2>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <h2 style={{ margin: 0 }}>Calories Burned</h2>
+          <div className="row" style={{ gap: 6 }}>
+            <button
+              onClick={() => setChartRange("week")}
+              style={{
+                padding: "5px 12px",
+                borderRadius: 20,
+                border: "1px solid #3c6364",
+                background: chartRange === "week" ? "#3c6364" : "transparent",
+                color: chartRange === "week" ? "#fff" : "#3c6364",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Week
+            </button>
+            <button
+              onClick={() => setChartRange("month")}
+              style={{
+                padding: "5px 12px",
+                borderRadius: 20,
+                border: "1px solid #3c6364",
+                background: chartRange === "month" ? "#3c6364" : "transparent",
+                color: chartRange === "month" ? "#fff" : "#3c6364",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Month
+            </button>
+          </div>
+        </div>
         <ResponsiveContainer width="100%" height={180}>
           <BarChart data={inVsBurned}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f2f2f7" />

@@ -1,5 +1,5 @@
 // Thin wrapper around the Anthropic Messages API for estimating food calories/macros,
-// classifying/parsing food-or-workout log entries, and reading InBody screenshots.
+// classifying/parsing food-or-workout-or-weight log entries, and reading InBody screenshots.
 // Uses fetch directly so we don't need the SDK as a dependency.
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
@@ -87,9 +87,10 @@ export async function estimateBodyScan({
 }
 
 // Unified classifier for the combined Log screen: given free text and/or a photo,
-// decide whether this is a food entry or a workout entry, and extract the
-// relevant fields for whichever it is. Duration for workouts is parsed straight
-// out of the text (e.g. "yoga sixty minutes") rather than a separate field.
+// decide whether this is a food entry, a workout entry, or a weigh-in, and
+// extract the relevant fields for whichever it is. Duration for workouts is
+// parsed straight out of the text (e.g. "yoga sixty minutes") rather than a
+// separate field.
 export async function estimateLogEntry({
   text,
   imageBase64,
@@ -108,11 +109,23 @@ export async function estimateLogEntry({
   }
   content.push({
     type: "text",
-    text: `You are logging a single entry into a personal fitness/nutrition tracker. The input is either a MEAL/FOOD (e.g. "two eggs and toast", or a photo of food) or a WORKOUT (e.g. "yoga sixty minutes", "ran 3 miles", "15 min of squats and situps"). ${
-      text ? `The person said: "${text}".` : ""
-    } ${imageBase64 ? "A photo is attached -- if it's a photo of food, treat this as a food entry." : ""}
-Decide which type it is, then extract fields for that type only (leave the other type's fields null). For food, give a single best-guess calorie/macro estimate like an experienced dietitian eyeballing a plate -- don't hedge. For a workout, parse the duration in minutes directly out of what was said if a time is mentioned (e.g. "sixty minutes" -> 60); if no duration was mentioned, use null.
-Respond with ONLY this JSON, no other text: {"type": "food" | "workout", "description": string, "calories": number | null, "protein_g": number | null, "carbs_g": number | null, "fat_g": number | null, "workout_type": string | null, "duration_min": number | null}`,
+    text: `You are logging a single entry into a personal fitness/nutrition tracker. The input is one of three things:
+- a MEAL/FOOD (e.g. "two eggs and toast", or a photo of food)
+- a WORKOUT (e.g. "yoga sixty minutes", "ran 3 miles", "15 min of squats and situps")
+- a WEIGH-IN (e.g. "I weighed in at 117 lbs", "117 today", "weight is 116.5", "down to 115")
+${text ? `The person said: "${text}".` : ""} ${
+      imageBase64 ? "A photo is attached -- if it's a photo of food, treat this as a food entry." : ""
+    }
+
+Decide which of the three types it is, then extract fields for that type only -- leave every field for the other two types null.
+
+For FOOD: always give a single best-guess calorie/macro estimate, like an experienced dietitian eyeballing a plate or a casual description -- never return null for calories/protein/carbs/fat on a food entry, even if the description is vague, conversational, or rambling. Only count food already eaten, not food they mention they're about to eat later. If the text truly contains no food that was eaten, it is not a food entry -- reconsider whether it's actually a weigh-in or workout instead.
+
+For WORKOUT: parse the duration in minutes directly out of what was said if a time is mentioned (e.g. "sixty minutes" -> 60); if no duration was mentioned, use null.
+
+For WEIGH-IN: extract the number as weight_lbs. Assume pounds unless a unit like kg is explicitly stated, and convert to lbs if so.
+
+Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weight", "description": string, "calories": number | null, "protein_g": number | null, "carbs_g": number | null, "fat_g": number | null, "workout_type": string | null, "duration_min": number | null, "weight_lbs": number | null}`,
   });
 
   return callClaude(content);

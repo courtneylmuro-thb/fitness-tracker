@@ -25,11 +25,17 @@ export async function GET(req: NextRequest) {
 
   const foodToday = foodTodayRes.data || [];
   const caloriesToday = foodToday.reduce((sum, f) => sum + (Number(f.estimated_calories) || 0), 0);
+  const proteinToday = foodToday.reduce((sum, f) => sum + (Number(f.protein_g) || 0), 0);
+  const carbsToday = foodToday.reduce((sum, f) => sum + (Number(f.carbs_g) || 0), 0);
+  const fatToday = foodToday.reduce((sum, f) => sum + (Number(f.fat_g) || 0), 0);
   const todayMetrics = (metricsRes.data || []).find((m) => m.date === today);
 
   return NextResponse.json({
     budget: settingsRes.data?.value ?? 2000,
     caloriesToday,
+    proteinToday,
+    carbsToday,
+    fatToday,
     burnedToday: todayMetrics?.total_calories_burned ?? null,
     isVacationToday: !!vacationRes.data,
     metrics: metricsRes.data || [],

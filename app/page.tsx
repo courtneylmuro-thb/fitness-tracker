@@ -17,10 +17,20 @@ import {
 type DashboardData = {
   budget: number;
   caloriesToday: number;
+  proteinToday: number;
+  carbsToday: number;
+  fatToday: number;
   burnedToday: number | null;
   isVacationToday: boolean;
   metrics: Array<{ date: string; total_calories_burned: number | null; weight_lbs: number | null; steps: number | null }>;
-  foodToday: Array<{ id: string; description: string; estimated_calories: number | null }>;
+  foodToday: Array<{
+    id: string;
+    description: string;
+    estimated_calories: number | null;
+    protein_g: number | null;
+    carbs_g: number | null;
+    fat_g: number | null;
+  }>;
   body: Array<{ date: string; body_fat_pct: number | null; skeletal_muscle_mass_lbs: number | null; weight_lbs: number | null }>;
   workouts: Array<{ id: string; date: string; workout_type: string; duration_min: number | null; source: string }>;
 };
@@ -55,6 +65,15 @@ function CalorieRing({ eaten, budget }: { eaten: number; budget: number }) {
           of {budget} cal
         </text>
       </svg>
+    </div>
+  );
+}
+
+function MacroStat({ label, grams }: { label: string; grams: number }) {
+  return (
+    <div style={{ textAlign: "center" }}>
+      <div className="subtle">{label}</div>
+      <div style={{ fontWeight: 700 }}>{Math.round(grams)}g</div>
     </div>
   );
 }
@@ -204,6 +223,11 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+        <div className="row" style={{ justifyContent: "center", gap: 24, marginTop: 14, paddingTop: 14, borderTop: "1px solid #f2f2f7" }}>
+          <MacroStat label="Protein" grams={data?.proteinToday ?? 0} />
+          <MacroStat label="Carbs" grams={data?.carbsToday ?? 0} />
+          <MacroStat label="Fat" grams={data?.fatToday ?? 0} />
+        </div>
       </div>
 
       <div className="card">
@@ -212,7 +236,14 @@ export default function Dashboard() {
         {data?.foodToday.map((f) => (
           <div key={f.id} className="food-entry">
             <span>{f.description}</span>
-            <span>{f.estimated_calories ? `${Math.round(f.estimated_calories)} cal` : "—"}</span>
+            <span style={{ textAlign: "right" }}>
+              <span>{f.estimated_calories ? `${Math.round(f.estimated_calories)} cal` : "—"}</span>
+              {(f.protein_g || f.carbs_g || f.fat_g) && (
+                <div className="subtle" style={{ fontSize: 11 }}>
+                  {Math.round(f.protein_g ?? 0)}p · {Math.round(f.carbs_g ?? 0)}c · {Math.round(f.fat_g ?? 0)}f
+                </div>
+              )}
+            </span>
           </div>
         ))}
       </div>

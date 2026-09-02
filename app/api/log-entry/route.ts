@@ -11,6 +11,7 @@ export async function POST(req: NextRequest) {
 
     const entry = await estimateLogEntry({ text, imageBase64, mediaType });
     const supabase = getSupabaseAdmin();
+    const entryDate = date || new Date().toISOString().slice(0, 10);
 
     if (entry.type === "workout") {
       const { data, error } = await supabase
@@ -18,13 +19,27 @@ export async function POST(req: NextRequest) {
         .insert({
           workout_type: entry.workout_type || entry.description || "Workout",
           duration_min: entry.duration_min ?? null,
-          date: date || new Date().toISOString().slice(0, 10),
+          date: entryDate,
           source: "manual",
         })
         .select()
         .single();
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ type: "workout", ...data });
+    }
+
+    if (entry.type === "weight") {
+      const { data, error } = await supabase
+        .from("body_composition")
+        .insert({
+          date: entryDate,
+          weight_lbs: entry.weight_lbs ?? null,
+          source: "manual_weigh_in",
+        })
+        .select()
+        .single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ type: "weight", ...data });
     }
 
     const insertRow: Record<string, any> = {

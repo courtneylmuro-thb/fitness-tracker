@@ -59,7 +59,7 @@ export async function estimateFood({
     type: "text",
     text: `You are estimating calories and macros for a personal food log. ${
       description ? `The person said: "${description}".` : "A photo of the food is attached."
-    } Give a single best-guess estimate -- don't hedge or give ranges, and don't ask clarifying questions. Over time small errors average out, so just estimate like an experienced dietitian eyeballing a plate. Respond with ONLY this JSON, no other text: {"description": string, "calories": number, "protein_g": number, "carbs_g": number, "fat_g": number}`,
+    } Give a single best-guess estimate -- don't hedge or give ranges, and don't ask clarifying questions. Never output null for calories, protein_g, carbs_g, or fat_g -- always pick a concrete number, even a rough one. Over time small errors average out, so just estimate like an experienced dietitian eyeballing a plate. Respond with ONLY this JSON, no other text: {"description": string, "calories": number, "protein_g": number, "carbs_g": number, "fat_g": number}`,
   });
 
   return callClaude(content);
@@ -119,7 +119,7 @@ ${text ? `The person said: "${text}".` : ""} ${
 
 Decide which of the three types it is, then extract fields for that type only -- leave every field for the other two types null.
 
-For FOOD: always give a single best-guess calorie/macro estimate, like an experienced dietitian eyeballing a plate or a casual description -- never return null for calories/protein/carbs/fat on a food entry, even if the description is vague, conversational, or rambling. Only count food already eaten, not food they mention they're about to eat later. If the text truly contains no food that was eaten, it is not a food entry -- reconsider whether it's actually a weigh-in or workout instead.
+For FOOD: always give a single best-guess calorie/macro estimate, like an experienced dietitian eyeballing a plate or a casual description. Never return null for calories/protein/carbs/fat once you've decided the entry is food -- always pick a concrete number, even a rough one, no matter how vague or rambling the description is. Only count food already eaten; ignore anything the person says they're about to eat or plan to eat later -- do not let a mention of future food push you toward returning null, just estimate the part that was actually eaten. Example: "I just ate a fun size Twix and I'm probably gonna go to sushi later" -> this is a food entry for the Twix ONLY (roughly 80 calories, 1g protein, 10g carbs, 4g fat) -- the sushi is not eaten yet, so it's ignored entirely, but you still must output real numbers, not null. If the text truly contains no food that was eaten, it is not a food entry -- reconsider whether it's actually a weigh-in or workout instead.
 
 For WORKOUT: parse the duration in minutes directly out of what was said if a time is mentioned (e.g. "sixty minutes" -> 60); if no duration was mentioned, use null.
 
@@ -128,5 +128,25 @@ For WEIGH-IN: extract the number as weight_lbs. Assume pounds unless a unit like
 Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weight", "description": string, "calories": number | null, "protein_g": number | null, "carbs_g": number | null, "fat_g": number | null, "workout_type": string | null, "duration_min": number | null, "weight_lbs": number | null}`,
   });
 
-  return callClaude(content);
+  const result = await callClaude(content);
+
+  // Safety net: if this was classified as food but the model still returned
+  // null for calories (happens occasionally on rambling/ambiguous input),
+  // retry once with the plain food estimator, which is more reliable at
+  // always producing a number.
+  if (result.type === "food" && (result.calories === null || result.calories === undefined)) {
+    try {
+      const retry = await estimateFood({ description: result.description || text, imageBase64, mediaType });
+      result.calories = retry.calories ?? result.calories;
+      result.protein_g = retry.protein_g ?? result.protein_g;
+      result.carbs_g = retry.carbs_g ?? result.carbs_g;
+      result.fat_g = retry.fat_g ?? result.fat_g;
+      result.description = result.description || retry.description;
+    } catch {
+      // If the retry also fails, fall through and return whatever we have --
+      // better to save the entry with no calorie count than to lose it entirely.
+    }
+  }
+
+  return result;
 }

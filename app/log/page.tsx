@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 
 type LogResult = {
-  type: "food" | "workout";
+  type: "food" | "workout" | "weight";
   description?: string;
   estimated_calories?: number;
   protein_g?: number;
@@ -11,6 +11,7 @@ type LogResult = {
   fat_g?: number;
   workout_type?: string;
   duration_min?: number | null;
+  weight_lbs?: number | null;
 };
 
 function localDateStr(): string {
@@ -104,13 +105,13 @@ export default function LogPage() {
     <div className="container">
       <div className="greeting">Log</div>
       <div className="subtle" style={{ marginBottom: 16 }}>
-        Food or workout, say it, type it, or snap a photo -- doesn't need to be precise.
+        Food, workout, or weigh-in -- say it, type it, or snap a photo, doesn't need to be precise.
       </div>
 
       <div className="card">
         <textarea
           rows={3}
-          placeholder='e.g. "two eggs and toast" or "yoga sixty minutes"'
+          placeholder='e.g. "two eggs and toast", "yoga sixty minutes", or "weighed in at 117"'
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
@@ -161,6 +162,16 @@ export default function LogPage() {
           <h2>Logged workout</h2>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>{result.workout_type}</div>
           <div className="subtle">{result.duration_min ? `${result.duration_min} min` : "No duration given"}</div>
+        </div>
+      )}
+
+      {result && result.type === "weight" && (
+        <div className="card">
+          <h2>Logged weigh-in</h2>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+            {result.weight_lbs ? `${result.weight_lbs} lbs` : "Weight recorded"}
+          </div>
+          <div className="subtle">Saved to Body Composition.</div>
         </div>
       )}
     </div>

@@ -6,11 +6,12 @@ export async function POST(req: NextRequest) {
   try {
     const { imageBase64, mediaType, date } = await req.json();
     if (!imageBase64) {
-      return NextResponse.json({ error: "Provide a photo of the InBody sheet" }, { status: 400 });
+      return NextResponse.json({ error: "Provide a photo of the InBody sheet or a scale reading" }, { status: 400 });
     }
 
     const reading = await estimateBodyScan({ imageBase64, mediaType });
     const supabase = getSupabaseAdmin();
+    const scanType = reading.scan_type === "scale_photo" ? "scale_photo" : "inbody";
 
     const { data, error } = await supabase
       .from("body_composition")
@@ -20,7 +21,8 @@ export async function POST(req: NextRequest) {
         body_fat_pct: reading.body_fat_pct ?? null,
         skeletal_muscle_mass_lbs: reading.skeletal_muscle_mass_lbs ?? null,
         visceral_fat_level: reading.visceral_fat_level ?? null,
-        source: "inbody_screenshot",
+        source: scanType === "scale_photo" ? "scale_photo" : "inbody_screenshot",
+        scan_type: scanType,
       })
       .select()
       .single();

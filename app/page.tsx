@@ -134,8 +134,8 @@ function BurnedTooltip({ active, payload }: any) {
       }}
     >
       <div style={{ fontWeight: 700, marginBottom: 6 }}>{fullDate ? formatFullDate(fullDate) : ""}</div>
-      <div style={{ color: "#8E8E93" }}>Baseline: {formatCal(resting)} cal</div>
-      <div style={{ color: "#FF9500" }}>Workout: {formatCal(active_)} cal</div>
+      <div style={{ color: "#3c6364" }}>Baseline: {formatCal(resting)} cal</div>
+      <div style={{ color: "#e16fa9" }}>Workout: {formatCal(active_)} cal</div>
       <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid #f2f2f7", fontWeight: 700 }}>
         Total: {formatCal(total)} cal
       </div>
@@ -368,8 +368,8 @@ export default function Dashboard() {
               wrapperStyle={{ fontSize: 12 }}
               formatter={(value) => (value === "resting" ? "Baseline" : "Workout")}
             />
-            <Bar dataKey="resting" stackId="burn" fill="#8E8E93" name="resting" />
-            <Bar dataKey="active" stackId="burn" fill="#FF9500" name="active" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="resting" stackId="burn" fill="#3c6364" name="resting" />
+            <Bar dataKey="active" stackId="burn" fill="#e16fa9" name="active" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

@@ -50,11 +50,6 @@ export async function POST(req: NextRequest) {
   for (const [date, values] of Object.entries(byDate)) {
     const totalBurned =
       (values.active_calories ?? 0) + (values.resting_calories ?? 0) || null;
-    // `steps` is an integer column, but Apple Health's step_count comes back
-    // as a fractional float (e.g. 8017.997329291596) since it's sensor
-    // estimated -- Postgres rejects a decimal string for an integer column
-    // ("invalid input syntax for type integer"), which silently failed the
-    // whole day's upsert. Round it before inserting.
     const stepsValue =
       values.steps != null ? Math.round(values.steps) : null;
     const { error } = await supabase.from("daily_metrics").upsert(
@@ -82,6 +77,22 @@ export async function POST(req: NextRequest) {
     const rawDuration = w.duration;
     const durationMin =
       rawDuration != null ? Math.round(Number(rawDuration) / 60) : null;
+
+    // The Health Auto Export "Workouts" automation re-sends the same session
+    // every time it runs (every 5 min), and this was a plain insert with no
+    // dedupe check -- so the same workout kept getting re-inserted on every
+    // automation run, producing duplicate rows (confirmed: Aug 31 and Sep 2
+    // each ended up with 2-3 identical rows). A given real workout session
+    // has a unique start_time, so skip the insert if a row with that same
+    // start_time + source already exists.
+    const { data: existing } = await supabase
+      .from("workouts")
+      .select("id")
+      .eq("start_time", w.start)
+      .eq("source", "apple_health")
+      .limit(1);
+    if (existing && existing.length > 0) continue;
+
     const { error } = await supabase.from("workouts").insert({
       date,
       start_time: w.start,

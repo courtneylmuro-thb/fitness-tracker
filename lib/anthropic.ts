@@ -130,23 +130,72 @@ Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weigh
 
   const result = await callClaude(content);
 
-  // Safety net: if this was classified as food but the model still returned
-  // null for calories (happens occasionally on rambling/ambiguous input),
-  // retry once with the plain food estimator, which is more reliable at
-  // always producing a number.
-  if (result.type === "food" && (result.calories === null || result.calories === undefined)) {
-    try {
-      const retry = await estimateFood({ description: result.description || text, imageBase64, mediaType });
-      result.calories = retry.calories ?? result.calories;
-      result.protein_g = retry.protein_g ?? result.protein_g;
-      result.carbs_g = retry.carbs_g ?? result.carbs_g;
-      result.fat_g = retry.fat_g ?? result.fat_g;
-      result.description = result.description || retry.description;
-    } catch {
-      // If the retry also fails, fall through and return whatever we have --
-      // better to save the entry with no calorie count than to lose it entirely.
-    }
+  if (result.type === "food") {
+    await ensureFoodNumbers(result, { imageBase64, mediaType }, text);
   }
 
   return result;
+}
+
+// Guarantees a food entry never leaves this file with a null calorie/macro
+// value, no matter how the model behaves on a given input. Tries the plain
+// food estimator first (different prompt, sometimes succeeds where the
+// classifier didn't), then a maximally blunt forced-guess prompt, and
+// finally falls back to a fixed generic-snack estimate as an absolute floor.
+// This is a deliberate belt-and-suspenders design: prompt instructions alone
+// ("never return null") are not reliable enough on their own -- this has been
+// observed to fail in production on real entries.
+async function ensureFoodNumbers(
+  result: any,
+  media: { imageBase64?: string; mediaType?: string },
+  originalText?: string
+) {
+  if (result.calories !== null && result.calories !== undefined) return;
+
+  try {
+    const retry = await estimateFood({
+      description: result.description || originalText,
+      imageBase64: media.imageBase64,
+      mediaType: media.mediaType,
+    });
+    result.calories = retry.calories ?? result.calories;
+    result.protein_g = retry.protein_g ?? result.protein_g;
+    result.carbs_g = retry.carbs_g ?? result.carbs_g;
+    result.fat_g = retry.fat_g ?? result.fat_g;
+    result.description = result.description || retry.description;
+  } catch {
+    // Anthropic API error on retry -- fall through to the next attempt.
+  }
+
+  if (result.calories !== null && result.calories !== undefined) return;
+
+  try {
+    const content: any[] = [];
+    if (media.imageBase64) {
+      content.push({
+        type: "image",
+        source: { type: "base64", media_type: normalizeMediaType(media.mediaType), data: media.imageBase64 },
+      });
+    }
+    content.push({
+      type: "text",
+      text: `Food log entry: "${result.description || originalText || "unspecified food"}". You must output a specific number for every field below. Do not output null under any circumstances, even if you are unsure what the food is or how much of it was eaten -- if genuinely unidentifiable, use a generic estimate for one typical serving of a snack (roughly 150-250 calories). Respond with ONLY this JSON, no other text: {"calories": number, "protein_g": number, "carbs_g": number, "fat_g": number}`,
+    });
+    const forced = await callClaude(content);
+    result.calories = forced.calories ?? result.calories;
+    result.protein_g = forced.protein_g ?? result.protein_g;
+    result.carbs_g = forced.carbs_g ?? result.carbs_g;
+    result.fat_g = forced.fat_g ?? result.fat_g;
+  } catch {
+    // Anthropic API error on forced retry -- fall through to the hard floor.
+  }
+
+  if (result.calories !== null && result.calories !== undefined) return;
+
+  // Absolute floor: if the model has refused twice, don't leave the entry
+  // blank. A rough generic-snack estimate is far more useful than "--".
+  result.calories = 200;
+  result.protein_g = result.protein_g ?? 5;
+  result.carbs_g = result.carbs_g ?? 22;
+  result.fat_g = result.fat_g ?? 8;
 }

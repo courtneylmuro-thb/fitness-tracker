@@ -22,7 +22,14 @@ type DashboardData = {
   fatToday: number;
   burnedToday: number | null;
   isVacationToday: boolean;
-  metrics: Array<{ date: string; total_calories_burned: number | null; weight_lbs: number | null; steps: number | null }>;
+  metrics: Array<{
+    date: string;
+    total_calories_burned: number | null;
+    active_calories: number | null;
+    resting_calories: number | null;
+    weight_lbs: number | null;
+    steps: number | null;
+  }>;
   foodToday: Array<{
     id: string;
     description: string;
@@ -34,6 +41,23 @@ type DashboardData = {
   body: Array<{ date: string; body_fat_pct: number | null; skeletal_muscle_mass_lbs: number | null; weight_lbs: number | null }>;
   workouts: Array<{ id: string; date: string; workout_type: string; duration_min: number | null; source: string }>;
 };
+
+// Formats a count of calories the way Courtney wants it read at a glance:
+// comma-grouped thousands, no decimal places (the raw synced values come
+// back from Health Auto Export with long float tails like 1653.2500895...,
+// which is unreadable in a chart tooltip or stat).
+function formatCal(n: number): string {
+  return Math.round(n).toLocaleString("en-US");
+}
+
+// Spells out the full date -- "September 2, 2026" -- for chart tooltips.
+// Parses the y-m-d pieces manually and builds a local Date rather than
+// `new Date(isoString)` so this can't drift a day off due to UTC parsing.
+function formatFullDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  return dt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
 
 // The ring's fill still tracks intake against budget (how full is your plate
 // today), but the big number in the center is now Net (intake minus what you
@@ -79,6 +103,36 @@ function MacroStat({ label, grams }: { label: string; grams: number }) {
     <div style={{ textAlign: "center" }}>
       <div className="subtle">{label}</div>
       <div style={{ fontWeight: 700 }}>{Math.round(grams)}g</div>
+    </div>
+  );
+}
+
+// Custom tooltip for the Calories Burned chart -- spells out the full date,
+// formats both stacked segments (baseline vs workout) with comma-grouped
+// whole numbers, and adds the total so the two colors are easy to read
+// against each other.
+function BurnedTooltip({ active, payload, label }: any) {
+  if (!active || !payload || !payload.length) return null;
+  const resting = payload.find((p: any) => p.dataKey === "resting")?.value ?? 0;
+  const active_ = payload.find((p: any) => p.dataKey === "active")?.value ?? 0;
+  const total = resting + active_;
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid #f2f2f7",
+        borderRadius: 8,
+        padding: "10px 12px",
+        fontSize: 13,
+        boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>{formatFullDate(label)}</div>
+      <div style={{ color: "#8E8E93" }}>Baseline: {formatCal(resting)} cal</div>
+      <div style={{ color: "#FF9500" }}>Workout: {formatCal(active_)} cal</div>
+      <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid #f2f2f7", fontWeight: 700 }}>
+        Total: {formatCal(total)} cal
+      </div>
     </div>
   );
 }
@@ -140,9 +194,14 @@ export default function Dashboard() {
   const greeting = hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening.";
 
   const rangeDays = chartRange === "week" ? 7 : 30;
+  // Split into resting (baseline/basal burn) and active (workout burn) so the
+  // chart can stack them in two colors -- Courtney wants to see how much of
+  // her daily burn is just existing vs. actually working out.
   const inVsBurned = (data?.metrics || []).slice(-rangeDays).map((m) => ({
     date: m.date.slice(5),
-    burned: m.total_calories_burned ?? 0,
+    fullDate: m.date,
+    resting: m.resting_calories ?? 0,
+    active: m.active_calories ?? 0,
   }));
 
   const bodyTrend = (data?.body || []).map((b) => ({
@@ -293,13 +352,18 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
-        <ResponsiveContainer width="100%" height={180}>
+        <ResponsiveContainer width="100%" height={200}>
           <BarChart data={inVsBurned}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f2f2f7" />
             <XAxis dataKey="date" fontSize={11} stroke="#86868b" />
-            <YAxis fontSize={11} stroke="#86868b" />
-            <Tooltip />
-            <Bar dataKey="burned" fill="#007AFF" radius={[4, 4, 0, 0]} />
+            <YAxis fontSize={11} stroke="#86868b" tickFormatter={(v) => formatCal(v)} />
+            <Tooltip content={<BurnedTooltip />} labelFormatter={() => ""} />
+            <Legend
+              wrapperStyle={{ fontSize: 12 }}
+              formatter={(value) => (value === "resting" ? "Baseline" : "Workout")}
+            />
+            <Bar dataKey="resting" stackId="burn" fill="#8E8E93" name="resting" />
+            <Bar dataKey="active" stackId="burn" fill="#FF9500" name="active" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

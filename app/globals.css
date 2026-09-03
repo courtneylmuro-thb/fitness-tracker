@@ -90,13 +90,17 @@ a {
 }
 
 .ptr-spinner {
-  font-size: 20px;
-  color: var(--teal);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 3px solid rgba(60, 99, 100, 0.15);
+  border-top-color: var(--teal);
   transition: transform 0.1s linear;
 }
 
 .ptr-spinner.spinning {
-  animation: ptr-spin 0.8s linear infinite;
+  border-top-color: var(--coral);
+  animation: ptr-spin 0.7s linear infinite;
 }
 
 @keyframes ptr-spin {

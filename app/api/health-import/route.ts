@@ -33,11 +33,20 @@ export async function POST(req: NextRequest) {
       const date = (point.date || "").slice(0, 10);
       if (!date) continue;
       byDate[date] = byDate[date] || {};
-      const qty = point.qty ?? point.value ?? 0;
+      // Health Auto Export sends qty/value as a STRING (e.g. "0.3409837826524296"),
+      // not a number. Without Number(), `(byDate[date][key] ?? 0) + qty` does JS
+      // string concatenation instead of addition -- across a metric with thousands
+      // of data points that builds a garbage non-numeric string, which then fails
+      // to insert into Postgres's numeric columns and silently errors out the
+      // whole day's upsert. That was the actual cause of daysWritten always
+      // coming back 0 even though metric names matched fine.
+      const raw = point.qty ?? point.value ?? 0;
+      const qty = Number(raw);
+      const safeQty = Number.isFinite(qty) ? qty : 0;
       if (key === "weight_lbs" || key === "sleep_hours") {
-        byDate[date][key] = qty; // latest/only value wins for these
+        byDate[date][key] = safeQty; // latest/only value wins for these
       } else {
-        byDate[date][key] = (byDate[date][key] ?? 0) + qty;
+        byDate[date][key] = (byDate[date][key] ?? 0) + safeQty;
       }
     }
   }
@@ -66,47 +75,22 @@ export async function POST(req: NextRequest) {
   for (const w of workouts) {
     const date = (w.start || "").slice(0, 10);
     if (!date) continue;
+    const rawCal = w.activeEnergyBurned?.qty;
+    const cal = rawCal != null ? Number(rawCal) : null;
+    const rawDuration = w.duration;
+    const durationMin =
+      rawDuration != null ? Math.round(Number(rawDuration) / 60) : null;
     const { error } = await supabase.from("workouts").insert({
       date,
       start_time: w.start,
       end_time: w.end,
       workout_type: w.name || "Workout",
-      duration_min: w.duration ? Math.round(Number(w.duration) / 60) : null,
-      calories: w.activeEnergyBurned?.qty ?? null,
+      duration_min: Number.isFinite(durationMin as number) ? durationMin : null,
+      calories: cal != null && Number.isFinite(cal) ? cal : null,
       source: "apple_health",
     });
     if (!error) workoutsWritten++;
   }
 
-  // --- TEMPORARY DIAGNOSTICS -------------------------------------------
-  // daysWritten/workoutsWritten came back 0 on a real export even though
-  // Courtney's phone clearly has step/calorie/workout data for the range
-  // sent. That means either metric.name values from Health Auto Export
-  // don't match METRIC_KEY_MAP's keys, or metric.data points aren't shaped
-  // the way this code expects (point.date / point.qty). Surfacing what was
-  // actually received so the mapping can be corrected, then this whole
-  // block gets deleted once the real fix lands.
-  const receivedMetricNames = Array.from(new Set(metrics.map((m: any) => m.name)));
-  const sampleMetric = metrics[0]
-    ? {
-        name: metrics[0].name,
-        dataPointCount: metrics[0].data?.length ?? 0,
-        firstDataPoint: metrics[0].data?.[0] ?? null,
-      }
-    : null;
-  const sampleWorkout = workouts[0] ?? null;
-  // --- END TEMPORARY DIAGNOSTICS ----------------------------------------
-
-  return NextResponse.json({
-    ok: true,
-    daysWritten,
-    workoutsWritten,
-    debug: {
-      metricsReceived: metrics.length,
-      workoutsReceived: workouts.length,
-      receivedMetricNames,
-      sampleMetric,
-      sampleWorkout,
-    },
-  });
+  return NextResponse.json({ ok: true, daysWritten, workoutsWritten });
 }

@@ -27,7 +27,13 @@ async function callClaude(content: any[]) {
   }
 
   const data = await res.json();
-  const text = data.content?.[0]?.text ?? "{}";
+  // The response can include non-text content blocks (e.g. a thinking block)
+  // ahead of the actual text block, so grab the first block that's actually
+  // type "text" rather than assuming content[0] is it -- content[0] being a
+  // thinking block was silently producing an empty {} result.
+  const blocks: any[] = Array.isArray(data.content) ? data.content : [];
+  const textBlock = blocks.find((b) => b && b.type === "text" && typeof b.text === "string");
+  const text = textBlock?.text ?? "{}";
   const match = text.match(/\{[\s\S]*\}/);
   return JSON.parse(match ? match[0] : text);
 }

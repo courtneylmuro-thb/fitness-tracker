@@ -33,42 +33,49 @@ export async function POST(req: NextRequest) {
       const date = (point.date || "").slice(0, 10);
       if (!date) continue;
       byDate[date] = byDate[date] || {};
-      // Health Auto Export sends qty/value as a STRING (e.g. "0.3409837826524296"),
-      // not a number. Without Number(), `(byDate[date][key] ?? 0) + qty` does JS
-      // string concatenation instead of addition -- across a metric with thousands
-      // of data points that builds a garbage non-numeric string, which then fails
-      // to insert into Postgres's numeric columns and silently errors out the
-      // whole day's upsert. That was the actual cause of daysWritten always
-      // coming back 0 even though metric names matched fine.
       const raw = point.qty ?? point.value ?? 0;
       const qty = Number(raw);
       const safeQty = Number.isFinite(qty) ? qty : 0;
       if (key === "weight_lbs" || key === "sleep_hours") {
-        byDate[date][key] = safeQty; // latest/only value wins for these
+        byDate[date][key] = safeQty;
       } else {
         byDate[date][key] = (byDate[date][key] ?? 0) + safeQty;
       }
     }
   }
 
+  // --- TEMPORARY DIAGNOSTICS (round 2) -----------------------------------
+  // The string->number fix landed and works on a synthetic payload, but
+  // Courtney's real export from the phone still comes back daysWritten=0.
+  // That means the upsert itself is erroring on her real data for a reason
+  // that isn't the qty-string bug -- capturing the actual Postgres error
+  // (message/code/details/hint) plus the exact row we tried to insert, for
+  // the first failing date, so the real cause is visible instead of guessed.
+  const errors: any[] = [];
+  // --- END TEMPORARY DIAGNOSTICS (setup) ----------------------------------
+
   let daysWritten = 0;
   for (const [date, values] of Object.entries(byDate)) {
     const totalBurned =
       (values.active_calories ?? 0) + (values.resting_calories ?? 0) || null;
-    const { error } = await supabase.from("daily_metrics").upsert(
-      {
-        date,
-        steps: values.steps ?? null,
-        active_calories: values.active_calories ?? null,
-        resting_calories: values.resting_calories ?? null,
-        total_calories_burned: totalBurned,
-        sleep_hours: values.sleep_hours ?? null,
-        weight_lbs: values.weight_lbs ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "date" }
-    );
-    if (!error) daysWritten++;
+    const row = {
+      date,
+      steps: values.steps ?? null,
+      active_calories: values.active_calories ?? null,
+      resting_calories: values.resting_calories ?? null,
+      total_calories_burned: totalBurned,
+      sleep_hours: values.sleep_hours ?? null,
+      weight_lbs: values.weight_lbs ?? null,
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase
+      .from("daily_metrics")
+      .upsert(row, { onConflict: "date" });
+    if (!error) {
+      daysWritten++;
+    } else if (errors.length < 3) {
+      errors.push({ date, row, error: { message: error.message, code: (error as any).code, details: (error as any).details, hint: (error as any).hint } });
+    }
   }
 
   let workoutsWritten = 0;
@@ -80,7 +87,7 @@ export async function POST(req: NextRequest) {
     const rawDuration = w.duration;
     const durationMin =
       rawDuration != null ? Math.round(Number(rawDuration) / 60) : null;
-    const { error } = await supabase.from("workouts").insert({
+    const workoutRow = {
       date,
       start_time: w.start,
       end_time: w.end,
@@ -88,9 +95,19 @@ export async function POST(req: NextRequest) {
       duration_min: Number.isFinite(durationMin as number) ? durationMin : null,
       calories: cal != null && Number.isFinite(cal) ? cal : null,
       source: "apple_health",
-    });
-    if (!error) workoutsWritten++;
+    };
+    const { error } = await supabase.from("workouts").insert(workoutRow);
+    if (!error) {
+      workoutsWritten++;
+    } else if (errors.length < 3) {
+      errors.push({ date, row: workoutRow, error: { message: error.message, code: (error as any).code, details: (error as any).details, hint: (error as any).hint } });
+    }
   }
 
-  return NextResponse.json({ ok: true, daysWritten, workoutsWritten });
+  return NextResponse.json({
+    ok: true,
+    daysWritten,
+    workoutsWritten,
+    debug: { daysAttempted: Object.keys(byDate).length, workoutsAttempted: workouts.length, errors },
+  });
 }

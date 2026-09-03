@@ -35,12 +35,17 @@ type DashboardData = {
   workouts: Array<{ id: string; date: string; workout_type: string; duration_min: number | null; source: string }>;
 };
 
-function CalorieRing({ eaten, budget }: { eaten: number; budget: number }) {
-  const pct = Math.min(eaten / (budget || 1), 1);
+// The ring's fill still tracks intake against budget (how full is your plate
+// today), but the big number in the center is now Net (intake minus what you
+// burned) rather than raw intake -- that's the number Courtney actually
+// wants to see at a glance.
+function CalorieRing({ intake, burned, budget }: { intake: number; burned: number; budget: number }) {
+  const net = intake - burned;
+  const pct = Math.min(intake / (budget || 1), 1);
   const radius = 70;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - pct);
-  const over = eaten > budget;
+  const over = net > budget;
 
   return (
     <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
@@ -59,10 +64,10 @@ function CalorieRing({ eaten, budget }: { eaten: number; budget: number }) {
           transform="rotate(-90 90 90)"
         />
         <text x="90" y="84" textAnchor="middle" fontSize="28" fontWeight="700" fill="#1d1d1f">
-          {Math.round(eaten)}
+          {Math.round(net)}
         </text>
         <text x="90" y="106" textAnchor="middle" fontSize="13" fill="#86868b">
-          of {budget} cal
+          net of {budget} cal
         </text>
       </svg>
     </div>
@@ -210,16 +215,20 @@ export default function Dashboard() {
 
       <div className="card">
         <h2>{isToday ? "Today's Calories" : "Calories"}</h2>
-        <CalorieRing eaten={data?.caloriesToday ?? 0} budget={data?.budget ?? 2000} />
+        <CalorieRing
+          intake={data?.caloriesToday ?? 0}
+          burned={data?.burnedToday ?? 0}
+          budget={data?.budget ?? 2000}
+        />
         <div className="row" style={{ justifyContent: "center", gap: 24, marginTop: 8 }}>
           <div style={{ textAlign: "center" }}>
-            <div className="subtle">Burned</div>
-            <div style={{ fontWeight: 700 }}>{data?.burnedToday ? Math.round(data.burnedToday) : "—"}</div>
+            <div className="subtle">Intake</div>
+            <div style={{ fontWeight: 700, color: "#34C759" }}>{Math.round(data?.caloriesToday ?? 0)}</div>
           </div>
           <div style={{ textAlign: "center" }}>
-            <div className="subtle">Net</div>
-            <div style={{ fontWeight: 700 }}>
-              {data?.burnedToday ? Math.round((data.caloriesToday ?? 0) - data.burnedToday) : "—"}
+            <div className="subtle">Burned</div>
+            <div style={{ fontWeight: 700, color: "#FF3B30" }}>
+              {data?.burnedToday ? Math.round(data.burnedToday) : "—"}
             </div>
           </div>
         </div>

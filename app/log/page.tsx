@@ -22,39 +22,105 @@ function localDateStr(): string {
   return `${y}-${m}-${d}`;
 }
 
+// iOS Safari (and every other iOS browser, since Apple forces them all onto
+// WebKit) never implemented Web Speech API, so voice input is recorded with
+// MediaRecorder instead and transcribed server-side via Groq/Whisper. Safari
+// only supports audio/mp4 for MediaRecorder, not audio/webm, so this checks
+// what the current browser can actually produce and uses that.
+function pickRecorderMimeType(): string {
+  if (typeof MediaRecorder === "undefined") return "";
+  const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg"];
+  for (const type of candidates) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return "";
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1]);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 export default function LogPage() {
   const [text, setText] = useState("");
   const [date, setDate] = useState(() => localDateStr());
   const [listening, setListening] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<LogResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
 
-  function startListening() {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
+  async function startListening() {
+    setError(null);
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setError("Voice input isn't supported in this browser -- type it instead.");
       return;
     }
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setText((prev) => (prev ? `${prev} ${transcript}` : transcript));
-    };
-    recognition.onend = () => setListening(false);
-    recognition.start();
-    recognitionRef.current = recognition;
-    setListening(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = pickRecorderMimeType();
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      chunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mimeType || "audio/mp4" });
+        await transcribeBlob(blob);
+      };
+
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setListening(true);
+    } catch (e: any) {
+      setError("Couldn't access the microphone -- check Settings > Privacy > Microphone and try again.");
+    }
   }
 
   function stopListening() {
-    recognitionRef.current?.stop();
+    mediaRecorderRef.current?.stop();
     setListening(false);
+  }
+
+  async function transcribeBlob(blob: Blob) {
+    if (blob.size === 0) {
+      setError("Didn't catch any audio -- try again.");
+      return;
+    }
+    setTranscribing(true);
+    setError(null);
+    try {
+      const audioBase64 = await blobToBase64(blob);
+      const res = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ audioBase64, mimeType: blob.type }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't transcribe that");
+      if (data.text) {
+        setText((prev) => (prev ? `${prev} ${data.text}` : data.text));
+      } else {
+        setError("Didn't catch that -- try again or type it.");
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setTranscribing(false);
+    }
   }
 
   async function submitText() {
@@ -101,6 +167,8 @@ export default function LogPage() {
     }
   }
 
+  const micLabel = listening ? "⏹ Stop" : transcribing ? "Transcribing…" : "🎤 Speak";
+
   return (
     <div className="container">
       <div className="greeting">Log</div>
@@ -117,8 +185,12 @@ export default function LogPage() {
         />
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <div className="row" style={{ marginBottom: 12 }}>
-          <button className="btn btn-secondary" onClick={listening ? stopListening : startListening}>
-            {listening ? "Stop listening" : "🎤 Speak"}
+          <button
+            className="btn btn-secondary"
+            onClick={listening ? stopListening : startListening}
+            disabled={transcribing}
+          >
+            {micLabel}
           </button>
           <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()}>
             📷 Photo

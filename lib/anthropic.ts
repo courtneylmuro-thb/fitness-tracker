@@ -130,7 +130,17 @@ Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weigh
 
   const result = await callClaude(content);
 
-  if (result.type === "food") {
+  // The route that consumes this only special-cases "workout" and "weight" --
+  // anything else lands in the food table. So the guarantee below has to use
+  // that same rule, not a strict `=== "food"` check. On confusing inputs the
+  // classifier has been observed to return a type value that isn't exactly
+  // "food" (whitespace, a slightly different word, etc.) while still not
+  // being a workout or weigh-in -- if we only checked `=== "food"`, those
+  // entries would slip through with null calories untouched. Normalizing to
+  // "food" here keeps this function's output and the route's insert logic in
+  // sync no matter what the classifier actually returned.
+  if (result.type !== "workout" && result.type !== "weight") {
+    result.type = "food";
     await ensureFoodNumbers(result, { imageBase64, mediaType }, text);
   }
 

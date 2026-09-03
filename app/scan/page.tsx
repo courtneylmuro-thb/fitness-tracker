@@ -8,6 +8,7 @@ type Reading = {
   body_fat_pct: number | null;
   skeletal_muscle_mass_lbs: number | null;
   visceral_fat_level: number | null;
+  scan_type?: "inbody" | "scale_photo";
 };
 
 function localDateStr(): string {
@@ -50,13 +51,14 @@ export default function ScanPage() {
     <div className="container">
       <div className="greeting">Body Scan</div>
       <div className="subtle" style={{ marginBottom: 16 }}>
-        Snap a photo of your InBody printout -- doesn't need to be daily.
+        Snap a photo of your InBody printout or a scale reading -- doesn't need to be daily. Either kind gets
+        detected automatically.
       </div>
 
       <div className="card">
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ marginBottom: 12 }} />
         <button className="btn" disabled={loading} onClick={() => fileInputRef.current?.click()}>
-          {loading ? "Reading scan…" : "📷 Upload InBody photo"}
+          {loading ? "Reading scan…" : "📷 Upload InBody or scale photo"}
         </button>
         <input
           ref={fileInputRef}
@@ -79,7 +81,7 @@ export default function ScanPage() {
 
       {result && (
         <div className="card">
-          <h2>Saved</h2>
+          <h2>Saved -- {result.scan_type === "scale_photo" ? "scale reading" : "InBody scan"}</h2>
           <div className="food-entry">
             <span>Weight</span>
             <span>{result.weight_lbs ? `${result.weight_lbs} lb` : "—"}</span>

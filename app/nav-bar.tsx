@@ -9,6 +9,8 @@ const links = [
   { href: "/log", label: "Log" },
   { href: "/scan", label: "Body Scan" },
   { href: "/photos", label: "Photos" },
+  { href: "/generate-workout", label: "AI Workout" },
+  { href: "/history", label: "Food History" },
 ];
 
 export default function NavBar() {

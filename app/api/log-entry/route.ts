@@ -35,11 +35,26 @@ export async function POST(req: NextRequest) {
           date: entryDate,
           weight_lbs: entry.weight_lbs ?? null,
           source: "manual_weigh_in",
+          scan_type: "manual",
         })
         .select()
         .single();
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ type: "weight", ...data });
+    }
+
+    if (entry.type === "period") {
+      const { data, error } = await supabase
+        .from("cycle_logs")
+        .insert({
+          date: entryDate,
+          flow: entry.flow ?? null,
+          notes: entry.period_notes ?? entry.description ?? null,
+        })
+        .select()
+        .single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ type: "period", ...data });
     }
 
     const insertRow: Record<string, any> = {
@@ -48,6 +63,7 @@ export async function POST(req: NextRequest) {
       protein_g: entry.protein_g ?? null,
       carbs_g: entry.carbs_g ?? null,
       fat_g: entry.fat_g ?? null,
+      nutrition_detail: entry.nutrition_detail ?? null,
       source: imageBase64 ? "photo" : "text",
     };
     if (date) insertRow.logged_at = `${date}T12:00:00`;

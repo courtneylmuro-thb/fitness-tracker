@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 
 type LogResult = {
-  type: "food" | "workout" | "weight";
+  type: "food" | "workout" | "weight" | "period";
   description?: string;
   estimated_calories?: number;
   protein_g?: number;
@@ -12,6 +12,8 @@ type LogResult = {
   workout_type?: string;
   duration_min?: number | null;
   weight_lbs?: number | null;
+  flow?: string | null;
+  notes?: string | null;
 };
 
 function localDateStr(): string {
@@ -59,6 +61,11 @@ export default function LogPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+
+  // "How I feel" -- stored for future graphing, nothing displayed from it yet.
+  const [feelingScore, setFeelingScore] = useState<number | null>(null);
+  const [feelingSaved, setFeelingSaved] = useState(false);
+  const [feelingSaving, setFeelingSaving] = useState(false);
 
   async function startListening() {
     setError(null);
@@ -167,19 +174,35 @@ export default function LogPage() {
     }
   }
 
+  async function saveFeeling(score: number) {
+    setFeelingScore(score);
+    setFeelingSaving(true);
+    setFeelingSaved(false);
+    try {
+      const res = await fetch("/api/mood", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ date, feelingScore: score }),
+      });
+      if (res.ok) setFeelingSaved(true);
+    } finally {
+      setFeelingSaving(false);
+    }
+  }
+
   const micLabel = listening ? "⏹ Stop" : transcribing ? "Transcribing…" : "🎤 Speak";
 
   return (
     <div className="container">
       <div className="greeting">Log</div>
       <div className="subtle" style={{ marginBottom: 16 }}>
-        Food, workout, or weigh-in -- say it, type it, or snap a photo, doesn't need to be precise.
+        Food, workout, weigh-in, or period note -- say it, type it, or snap a photo, doesn't need to be precise.
       </div>
 
       <div className="card">
         <textarea
           rows={3}
-          placeholder='e.g. "two eggs and toast", "yoga sixty minutes", or "weighed in at 117"'
+          placeholder='e.g. "two eggs and toast", "yoga sixty minutes", "weighed in at 117", or "started my period"'
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
@@ -210,6 +233,33 @@ export default function LogPage() {
         <button className="btn" disabled={loading || !text.trim()} onClick={submitText}>
           {loading ? "Logging…" : "Log it"}
         </button>
+      </div>
+
+      <div className="card">
+        <h2>How do you feel today?</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: 4 }}>
+          {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+            <button
+              key={n}
+              onClick={() => saveFeeling(n)}
+              style={{
+                padding: "8px 0",
+                borderRadius: 8,
+                border: "1px solid #3c6364",
+                background: feelingScore === n ? "#3c6364" : "transparent",
+                color: feelingScore === n ? "#fff" : "#3c6364",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+        <div className="subtle" style={{ marginTop: 10 }}>
+          {feelingSaving ? "Saving…" : feelingSaved ? "Saved -- we'll use this for trends later." : "1 = rough, 10 = amazing."}
+        </div>
       </div>
 
       {error && (
@@ -244,6 +294,14 @@ export default function LogPage() {
             {result.weight_lbs ? `${result.weight_lbs} lbs` : "Weight recorded"}
           </div>
           <div className="subtle">Saved to Body Composition.</div>
+        </div>
+      )}
+
+      {result && result.type === "period" && (
+        <div className="card">
+          <h2>Logged period note</h2>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>{result.flow ? `Flow: ${result.flow}` : "Noted"}</div>
+          {result.notes && <div className="subtle">{result.notes}</div>}
         </div>
       )}
     </div>

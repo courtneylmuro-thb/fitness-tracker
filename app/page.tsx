@@ -111,8 +111,14 @@ function MacroStat({ label, grams }: { label: string; grams: number }) {
 // formats both stacked segments (baseline vs workout) with comma-grouped
 // whole numbers, and adds the total so the two colors are easy to read
 // against each other.
-function BurnedTooltip({ active, payload, label }: any) {
+function BurnedTooltip({ active, payload }: any) {
   if (!active || !payload || !payload.length) return null;
+  // Recharts hands this component the XAxis's own dataKey value as `label`
+  // (the short "08-31" tick text), not the full ISO date -- pulling the
+  // real date off `payload[0].payload.fullDate` (the original data row)
+  // instead is what actually produces "September 2, 2026" rather than
+  // garbage like "July 1, 1910" from trying to parse "08-31" as a y-m-d.
+  const fullDate = payload[0]?.payload?.fullDate;
   const resting = payload.find((p: any) => p.dataKey === "resting")?.value ?? 0;
   const active_ = payload.find((p: any) => p.dataKey === "active")?.value ?? 0;
   const total = resting + active_;
@@ -127,7 +133,7 @@ function BurnedTooltip({ active, payload, label }: any) {
         boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
       }}
     >
-      <div style={{ fontWeight: 700, marginBottom: 6 }}>{formatFullDate(label)}</div>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>{fullDate ? formatFullDate(fullDate) : ""}</div>
       <div style={{ color: "#8E8E93" }}>Baseline: {formatCal(resting)} cal</div>
       <div style={{ color: "#FF9500" }}>Workout: {formatCal(active_)} cal</div>
       <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid #f2f2f7", fontWeight: 700 }}>
@@ -357,7 +363,7 @@ export default function Dashboard() {
             <CartesianGrid strokeDasharray="3 3" stroke="#f2f2f7" />
             <XAxis dataKey="date" fontSize={11} stroke="#86868b" />
             <YAxis fontSize={11} stroke="#86868b" tickFormatter={(v) => formatCal(v)} />
-            <Tooltip content={<BurnedTooltip />} labelFormatter={() => ""} />
+            <Tooltip content={<BurnedTooltip />} />
             <Legend
               wrapperStyle={{ fontSize: 12 }}
               formatter={(value) => (value === "resting" ? "Baseline" : "Workout")}

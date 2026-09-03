@@ -78,5 +78,35 @@ export async function POST(req: NextRequest) {
     if (!error) workoutsWritten++;
   }
 
-  return NextResponse.json({ ok: true, daysWritten, workoutsWritten });
+  // --- TEMPORARY DIAGNOSTICS -------------------------------------------
+  // daysWritten/workoutsWritten came back 0 on a real export even though
+  // Courtney's phone clearly has step/calorie/workout data for the range
+  // sent. That means either metric.name values from Health Auto Export
+  // don't match METRIC_KEY_MAP's keys, or metric.data points aren't shaped
+  // the way this code expects (point.date / point.qty). Surfacing what was
+  // actually received so the mapping can be corrected, then this whole
+  // block gets deleted once the real fix lands.
+  const receivedMetricNames = Array.from(new Set(metrics.map((m: any) => m.name)));
+  const sampleMetric = metrics[0]
+    ? {
+        name: metrics[0].name,
+        dataPointCount: metrics[0].data?.length ?? 0,
+        firstDataPoint: metrics[0].data?.[0] ?? null,
+      }
+    : null;
+  const sampleWorkout = workouts[0] ?? null;
+  // --- END TEMPORARY DIAGNOSTICS ----------------------------------------
+
+  return NextResponse.json({
+    ok: true,
+    daysWritten,
+    workoutsWritten,
+    debug: {
+      metricsReceived: metrics.length,
+      workoutsReceived: workouts.length,
+      receivedMetricNames,
+      sampleMetric,
+      sampleWorkout,
+    },
+  });
 }

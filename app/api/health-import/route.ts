@@ -33,6 +33,8 @@ export async function POST(req: NextRequest) {
       const date = (point.date || "").slice(0, 10);
       if (!date) continue;
       byDate[date] = byDate[date] || {};
+      // Health Auto Export sends qty/value as a STRING, not a number -- coerce
+      // it or `(byDate[date][key] ?? 0) + qty` does string concatenation.
       const raw = point.qty ?? point.value ?? 0;
       const qty = Number(raw);
       const safeQty = Number.isFinite(qty) ? qty : 0;
@@ -44,38 +46,31 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // --- TEMPORARY DIAGNOSTICS (round 2) -----------------------------------
-  // The string->number fix landed and works on a synthetic payload, but
-  // Courtney's real export from the phone still comes back daysWritten=0.
-  // That means the upsert itself is erroring on her real data for a reason
-  // that isn't the qty-string bug -- capturing the actual Postgres error
-  // (message/code/details/hint) plus the exact row we tried to insert, for
-  // the first failing date, so the real cause is visible instead of guessed.
-  const errors: any[] = [];
-  // --- END TEMPORARY DIAGNOSTICS (setup) ----------------------------------
-
   let daysWritten = 0;
   for (const [date, values] of Object.entries(byDate)) {
     const totalBurned =
       (values.active_calories ?? 0) + (values.resting_calories ?? 0) || null;
-    const row = {
-      date,
-      steps: values.steps ?? null,
-      active_calories: values.active_calories ?? null,
-      resting_calories: values.resting_calories ?? null,
-      total_calories_burned: totalBurned,
-      sleep_hours: values.sleep_hours ?? null,
-      weight_lbs: values.weight_lbs ?? null,
-      updated_at: new Date().toISOString(),
-    };
-    const { error } = await supabase
-      .from("daily_metrics")
-      .upsert(row, { onConflict: "date" });
-    if (!error) {
-      daysWritten++;
-    } else if (errors.length < 3) {
-      errors.push({ date, row, error: { message: error.message, code: (error as any).code, details: (error as any).details, hint: (error as any).hint } });
-    }
+    // `steps` is an integer column, but Apple Health's step_count comes back
+    // as a fractional float (e.g. 8017.997329291596) since it's sensor
+    // estimated -- Postgres rejects a decimal string for an integer column
+    // ("invalid input syntax for type integer"), which silently failed the
+    // whole day's upsert. Round it before inserting.
+    const stepsValue =
+      values.steps != null ? Math.round(values.steps) : null;
+    const { error } = await supabase.from("daily_metrics").upsert(
+      {
+        date,
+        steps: stepsValue,
+        active_calories: values.active_calories ?? null,
+        resting_calories: values.resting_calories ?? null,
+        total_calories_burned: totalBurned,
+        sleep_hours: values.sleep_hours ?? null,
+        weight_lbs: values.weight_lbs ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "date" }
+    );
+    if (!error) daysWritten++;
   }
 
   let workoutsWritten = 0;
@@ -87,7 +82,7 @@ export async function POST(req: NextRequest) {
     const rawDuration = w.duration;
     const durationMin =
       rawDuration != null ? Math.round(Number(rawDuration) / 60) : null;
-    const workoutRow = {
+    const { error } = await supabase.from("workouts").insert({
       date,
       start_time: w.start,
       end_time: w.end,
@@ -95,19 +90,9 @@ export async function POST(req: NextRequest) {
       duration_min: Number.isFinite(durationMin as number) ? durationMin : null,
       calories: cal != null && Number.isFinite(cal) ? cal : null,
       source: "apple_health",
-    };
-    const { error } = await supabase.from("workouts").insert(workoutRow);
-    if (!error) {
-      workoutsWritten++;
-    } else if (errors.length < 3) {
-      errors.push({ date, row: workoutRow, error: { message: error.message, code: (error as any).code, details: (error as any).details, hint: (error as any).hint } });
-    }
+    });
+    if (!error) workoutsWritten++;
   }
 
-  return NextResponse.json({
-    ok: true,
-    daysWritten,
-    workoutsWritten,
-    debug: { daysAttempted: Object.keys(byDate).length, workoutsAttempted: workouts.length, errors },
-  });
+  return NextResponse.json({ ok: true, daysWritten, workoutsWritten });
 }

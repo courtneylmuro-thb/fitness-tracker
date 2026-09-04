@@ -4,22 +4,46 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// Vercel's serverless functions run in UTC. Using new Date().toISOString() for
+// "today" rolls over at 5-6pm Pacific (whenever UTC hits midnight), hours before
+// Courtney's actual day is over -- so late in the evening the dashboard would
+// silently start querying for a date that hasn't happened yet, and today's real
+// food/metrics rows (correctly dated by Pacific calendar day) would come up
+// empty. Compute "today" from the Pacific calendar date instead.
+const TIMEZONE = "America/Los_Angeles";
+
+function pacificDateString(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 export async function GET() {
   const supabase = getSupabaseAdmin();
-  const today = new Date().toISOString().slice(0, 10);
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const today = pacificDateString(new Date());
+  const thirtyDaysAgo = pacificDateString(new Date(Date.now() - 30 * 86400000));
+  // food_logs is filtered by Pacific calendar day below (not a UTC timestamp
+  // boundary), so pull a generous window here and let the filter narrow it.
+  const threeDaysAgoUtc = new Date(Date.now() - 3 * 86400000).toISOString();
 
-  const [metricsRes, foodTodayRes, bodyRes, workoutsRes, settingsRes, vacationRes] =
+  const [metricsRes, foodWindowRes, bodyRes, workoutsRes, settingsRes, vacationRes] =
     await Promise.all([
       supabase.from("daily_metrics").select("*").gte("date", thirtyDaysAgo).order("date"),
-      supabase.from("food_logs").select("*").gte("logged_at", `${today}T00:00:00`).order("logged_at"),
+      supabase.from("food_logs").select("*").gte("logged_at", threeDaysAgoUtc).order("logged_at"),
       supabase.from("body_composition").select("*").order("date", { ascending: false }).limit(12),
       supabase.from("workouts").select("*").gte("date", thirtyDaysAgo).order("date", { ascending: false }),
       supabase.from("settings").select("*").eq("key", "daily_calorie_budget").single(),
       supabase.from("vacation_days").select("*").eq("date", today).maybeSingle(),
     ]);
 
-  const foodToday = foodTodayRes.data || [];
+  const foodToday = (foodWindowRes.data || []).filter(
+    (f) => pacificDateString(new Date(f.logged_at)) === today
+  );
   const caloriesToday = foodToday.reduce((sum, f) => sum + (Number(f.estimated_calories) || 0), 0);
   const metrics = metricsRes.data || [];
   const todayMetrics = metrics.find((m) => m.date === today);

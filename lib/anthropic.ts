@@ -1,12 +1,20 @@
 // Thin wrapper around the Anthropic Messages API for estimating food calories/macros,
 // classifying/parsing food-or-workout-or-weight-or-period log entries, reading InBody
-// screenshots and scale photos, and generating on-demand workouts.
+// screenshots and scale photos, and generating on-demand workouts (single-shot or
+// conversational).
 // Uses fetch directly so we don't need the SDK as a dependency.
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-5";
 
-async function callClaude(content: any[]) {
+// Low-level call: takes a full messages array (for multi-turn conversations) plus
+// an optional system prompt, and returns the parsed JSON the model was asked to
+// respond with.
+async function callClaudeMessages(
+  messages: { role: "user" | "assistant"; content: any }[],
+  maxTokens = 800,
+  system?: string
+) {
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
     headers: {
@@ -16,8 +24,9 @@ async function callClaude(content: any[]) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 800,
-      messages: [{ role: "user", content }],
+      max_tokens: maxTokens,
+      ...(system ? { system } : {}),
+      messages,
     }),
   });
 
@@ -36,6 +45,11 @@ async function callClaude(content: any[]) {
   const text = textBlock?.text ?? "{}";
   const match = text.match(/\{[\s\S]*\}/);
   return JSON.parse(match ? match[0] : text);
+}
+
+// Single-user-turn convenience wrapper used by all the single-shot estimators below.
+async function callClaude(content: any[]) {
+  return callClaudeMessages([{ role: "user", content }]);
 }
 
 // Normalizes whatever content-type the browser reports into one of the types
@@ -101,7 +115,9 @@ export async function estimateBodyScan({
 
 // Generates a single on-demand workout from what Courtney has available
 // right now -- equipment/location, how long she has, and what she wants to
-// focus on. Purely generative, no image involved.
+// focus on. Purely generative, no image involved. Kept as a single-shot
+// fallback / building block -- the conversational flow (chatWorkout below)
+// is what the workout-generator page actually calls now.
 export async function generateWorkout({
   equipment,
   location,
@@ -125,7 +141,54 @@ export async function generateWorkout({
 Give a specific, orderable list of exercises with sets/reps or a duration for each (e.g. "3x12 goblet squats" or "5 min jump rope"), grouped into a brief warmup, the main block, and a brief cooldown. Keep it realistic for the stated time and equipment -- never invent equipment that wasn't mentioned as available. Respond with ONLY this JSON, no other text: {"title": string, "estimated_duration_min": number, "warmup": string[], "main": string[], "cooldown": string[], "notes": string}`,
     },
   ];
-  return callClaude(content);
+  const workout = await callClaude(content);
+  ensureAbsBlock(workout);
+  return workout;
+}
+
+// Every generated workout, single-shot or conversational, must include a
+// dedicated upper-abs block -- the area between the bust and belly button is
+// the one zone Courtney's high-rise pants actually show, so it's a standing
+// requirement regardless of the stated focus. The prompt already asks for
+// this, but prompt instructions alone aren't reliable enough on their own
+// (same lesson as the food-estimate null-guarantee below) -- if the model's
+// "main" list doesn't mention abs at all, append a default block as a floor.
+function ensureAbsBlock(workout: any) {
+  if (!workout || !Array.isArray(workout.main)) return;
+  const hasAbs = workout.main.some((item: string) => /\babs?\b|crunch|sit-?up/i.test(item));
+  if (!hasAbs) {
+    workout.main.push(
+      "5 min upper abs -- weighted or cable crunches, focusing on the area between your bust and belly button"
+    );
+  }
+}
+
+// Conversational workout builder -- the workout-generator page is a chat, not
+// a form. Courtney just says what she's got ("home gym, 25 minutes, focus on
+// my butt") and this either asks one short clarifying question (equipment
+// specifics, injuries) or returns the finished workout. `history` is the
+// full back-and-forth so far, alternating user/assistant turns; assistant
+// turns are the raw JSON this function itself returned on a prior call, so
+// the model has full context to adjust a workout Courtney is pushing back on.
+export async function chatWorkout(history: { role: "user" | "assistant"; content: string }[]) {
+  const system = `You are building a single on-demand workout for Courtney inside her personal fitness app, through a back-and-forth conversation -- she talks to you, there's no form to fill out.
+
+She'll describe what she's got in her own words, e.g. "I'm at my home gym and I want a 25 minute workout focused on my butt." Pull out whatever she's already told you: location/equipment, duration, and focus.
+
+Ask a SHORT clarifying question -- one at a time, conversationally -- ONLY if you genuinely need it to build a safe, sensible workout: for example, what specific equipment she has at a "home gym" or "gym" she mentioned (e.g. does she have a barbell), or whether she has any injuries or pain to work around. Do not ask about anything she's already told you, and never ask more than one question in a single turn. Once you have enough to build something reasonable, just generate the workout -- don't over-clarify or stall.
+
+If she pushes back on a workout you already generated (wants it harder, easier, swap an exercise, more time, etc.), revise it and return a new full workout in the same JSON shape -- don't just describe the change in prose.
+
+Every workout you generate MUST include a dedicated 5-minute upper-abs block as part of "main" -- exercises that specifically target the upper abs (the area between the bust and the belly button: e.g. crunches, sit-ups, cable crunches, weighted crunches), clearly labeled as such. This is a hard requirement on every single workout regardless of the stated focus, because it's the one zone that actually shows in her high-rise pants.
+
+Respond with ONLY JSON, no other text, in exactly one of these two shapes:
+- If you need more information: {"type": "question", "question": string}
+- If you have enough to build (or revise) the workout: {"type": "workout", "title": string, "estimated_duration_min": number, "warmup": string[], "main": string[], "cooldown": string[], "notes": string}`;
+
+  const messages = history.map((m) => ({ role: m.role, content: m.content }));
+  const result = await callClaudeMessages(messages, 800, system);
+  if (result.type === "workout") ensureAbsBlock(result);
+  return result;
 }
 
 // Unified classifier for the combined Log screen: given free text and/or a photo,

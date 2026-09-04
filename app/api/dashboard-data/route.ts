@@ -1,22 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   const supabase = getSupabaseAdmin();
-  const { searchParams } = new URL(req.url);
-  const fallbackToday = new Date().toISOString().slice(0, 10);
-  const today = searchParams.get("date") || fallbackToday;
-  const dayStart = searchParams.get("dayStart") || `${today}T00:00:00.000Z`;
-  const dayEnd = searchParams.get("dayEnd") || `${today}T23:59:59.999Z`;
+  const today = new Date().toISOString().slice(0, 10);
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
   const [metricsRes, foodTodayRes, bodyRes, workoutsRes, settingsRes, vacationRes] =
     await Promise.all([
       supabase.from("daily_metrics").select("*").gte("date", thirtyDaysAgo).order("date"),
-      supabase.from("food_logs").select("*").gte("logged_at", dayStart).lte("logged_at", dayEnd).order("logged_at"),
+      supabase.from("food_logs").select("*").gte("logged_at", `${today}T00:00:00`).order("logged_at"),
       supabase.from("body_composition").select("*").order("date", { ascending: false }).limit(12),
       supabase.from("workouts").select("*").gte("date", thirtyDaysAgo).order("date", { ascending: false }),
       supabase.from("settings").select("*").eq("key", "daily_calorie_budget").single(),
@@ -25,20 +21,41 @@ export async function GET(req: NextRequest) {
 
   const foodToday = foodTodayRes.data || [];
   const caloriesToday = foodToday.reduce((sum, f) => sum + (Number(f.estimated_calories) || 0), 0);
-  const proteinToday = foodToday.reduce((sum, f) => sum + (Number(f.protein_g) || 0), 0);
-  const carbsToday = foodToday.reduce((sum, f) => sum + (Number(f.carbs_g) || 0), 0);
-  const fatToday = foodToday.reduce((sum, f) => sum + (Number(f.fat_g) || 0), 0);
-  const todayMetrics = (metricsRes.data || []).find((m) => m.date === today);
+  const metrics = metricsRes.data || [];
+  const todayMetrics = metrics.find((m) => m.date === today);
+
+  // The health sync only fills in resting_calories via an overnight batch job --
+  // a day's row gets its resting_calories written the *next* morning, not live.
+  // So on a fresh "today" row, resting_calories is still null and
+  // total_calories_burned is just the tiny passive active-calorie ping so far
+  // (e.g. 0.66), which rounded to "1" on the dashboard and looked broken.
+  // Fix: while today's resting_calories hasn't synced yet, estimate it from the
+  // average of the last 7 days that do have a real resting_calories value, and
+  // add today's actual active_calories on top -- so "Burned" shows a realistic
+  // number instead of near-zero, and flag it as an estimate.
+  let burnedToday: number | null = todayMetrics?.total_calories_burned ?? null;
+  let burnedTodayIsEstimate = false;
+
+  if (todayMetrics && (todayMetrics.resting_calories === null || todayMetrics.resting_calories === undefined)) {
+    const recentResting = metrics
+      .filter((m) => m.date !== today && m.resting_calories !== null && m.resting_calories !== undefined)
+      .slice(-7)
+      .map((m) => Number(m.resting_calories));
+
+    if (recentResting.length > 0) {
+      const avgResting = recentResting.reduce((s, v) => s + v, 0) / recentResting.length;
+      burnedToday = avgResting + (Number(todayMetrics.active_calories) || 0);
+      burnedTodayIsEstimate = true;
+    }
+  }
 
   return NextResponse.json({
     budget: settingsRes.data?.value ?? 2000,
     caloriesToday,
-    proteinToday,
-    carbsToday,
-    fatToday,
-    burnedToday: todayMetrics?.total_calories_burned ?? null,
+    burnedToday,
+    burnedTodayIsEstimate,
     isVacationToday: !!vacationRes.data,
-    metrics: metricsRes.data || [],
+    metrics,
     foodToday,
     body: (bodyRes.data || []).slice().reverse(),
     workouts: workoutsRes.data || [],

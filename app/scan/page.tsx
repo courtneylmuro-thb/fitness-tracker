@@ -24,7 +24,13 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Reading | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Two separate hidden inputs: one forces the camera open via the
+  // `capture` attribute (for a fresh InBody printout or scale reading),
+  // the other has no `capture` attribute so mobile browsers show the
+  // normal picker -- Photo Library / Files / etc -- so an existing
+  // screenshot can be uploaded instead of only ever taking a new photo.
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const libraryInputRef = useRef<HTMLInputElement>(null);
 
   async function submitPhoto(file: File) {
     setLoading(true);
@@ -51,17 +57,22 @@ export default function ScanPage() {
     <div className="container">
       <div className="greeting">Body Scan</div>
       <div className="subtle" style={{ marginBottom: 16 }}>
-        Snap a photo of your InBody printout or a scale reading -- doesn't need to be daily. Either kind gets
-        detected automatically.
+        Snap a photo of your InBody printout or a scale reading, or upload an existing screenshot -- doesn't
+        need to be daily. Either kind gets detected automatically.
       </div>
 
       <div className="card">
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ marginBottom: 12 }} />
-        <button className="btn" disabled={loading} onClick={() => fileInputRef.current?.click()}>
-          {loading ? "Reading scan…" : "📷 Upload InBody or scale photo"}
-        </button>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn" disabled={loading} onClick={() => cameraInputRef.current?.click()}>
+            {loading ? "Reading scan…" : "📷 Take photo"}
+          </button>
+          <button className="btn btn-secondary" disabled={loading} onClick={() => libraryInputRef.current?.click()}>
+            🖼️ Upload photo
+          </button>
+        </div>
         <input
-          ref={fileInputRef}
+          ref={cameraInputRef}
           type="file"
           accept="image/*"
           capture="environment"
@@ -69,6 +80,18 @@ export default function ScanPage() {
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) submitPhoto(file);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={libraryInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) submitPhoto(file);
+            e.target.value = "";
           }}
         />
       </div>

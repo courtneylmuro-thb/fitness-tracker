@@ -29,14 +29,23 @@ export async function GET(req: NextRequest) {
   const today = searchParams.get("date") || pacificToday;
   const dayStart = searchParams.get("dayStart") || `${today}T00:00:00.000Z`;
   const dayEnd = searchParams.get("dayEnd") || `${today}T23:59:59.999Z`;
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+
+  // The dashboard's Calories Burned / Weight Trend / Body Composition Trend
+  // charts all have Week/Month/Year toggles now, so the backing queries need
+  // up to a year of history, not just 30 days -- a year-back cutoff covers
+  // every range those toggles can select, and the frontend still slices down
+  // to the selected window from there. (In practice Courtney's Health Auto
+  // Export sync only just started, so there isn't a year of real data yet --
+  // this just means the charts stop being artificially capped at 30 days as
+  // more days accumulate, rather than actually backfilling anything.)
+  const yearAgo = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);
 
   const [metricsRes, foodTodayRes, bodyRes, workoutsRes, settingsRes, vacationRes] =
     await Promise.all([
-      supabase.from("daily_metrics").select("*").gte("date", thirtyDaysAgo).order("date"),
+      supabase.from("daily_metrics").select("*").gte("date", yearAgo).order("date"),
       supabase.from("food_logs").select("*").gte("logged_at", dayStart).lte("logged_at", dayEnd).order("logged_at"),
-      supabase.from("body_composition").select("*").order("date", { ascending: false }).limit(12),
-      supabase.from("workouts").select("*").gte("date", thirtyDaysAgo).order("date", { ascending: false }),
+      supabase.from("body_composition").select("*").gte("date", yearAgo).order("date", { ascending: true }),
+      supabase.from("workouts").select("*").gte("date", yearAgo).order("date", { ascending: false }),
       supabase.from("settings").select("*").eq("key", "daily_calorie_budget").single(),
       supabase.from("vacation_days").select("*").eq("date", today).maybeSingle(),
     ]);
@@ -89,7 +98,7 @@ export async function GET(req: NextRequest) {
     isVacationToday: !!vacationRes.data,
     metrics,
     foodToday,
-    body: (bodyRes.data || []).slice().reverse(),
+    body: bodyRes.data || [],
     workouts: workoutsRes.data || [],
   });
 }

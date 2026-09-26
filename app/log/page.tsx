@@ -38,15 +38,54 @@ function pickRecorderMimeType(): string {
   return "";
 }
 
+// Wraps whatever the browser throws (often a terse WebKit DOMException like
+// "The string did not match the expected pattern.") with which step it
+// actually happened in, so a future failure says where to look instead of
+// just repeating the raw browser message with no context.
+function stepError(step: string, e: any): Error {
+  const raw = e?.message || e?.name || String(e);
+  return new Error(`${step}: ${raw}`);
+}
+
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.split(",")[1]);
+      try {
+        const result = reader.result as string;
+        const parts = result.split(",");
+        if (parts.length < 2) {
+          reject(stepError("Reading recording (unexpected data URL format)", new Error("no comma separator")));
+          return;
+        }
+        resolve(parts[1]);
+      } catch (e) {
+        reject(stepError("Reading recording", e));
+      }
     };
-    reader.onerror = reject;
+    reader.onerror = () => reject(stepError("Reading recording", reader.error));
     reader.readAsDataURL(blob);
+  });
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const result = reader.result as string;
+        const parts = result.split(",");
+        if (parts.length < 2) {
+          reject(stepError("Reading photo (unexpected data URL format)", new Error("no comma separator")));
+          return;
+        }
+        resolve(parts[1]);
+      } catch (e) {
+        reject(stepError("Reading photo", e));
+      }
+    };
+    reader.onerror = () => reject(stepError("Reading photo", reader.error));
+    reader.readAsDataURL(file);
   });
 }
 
@@ -74,32 +113,59 @@ export default function LogPage() {
       setError("Voice input isn't supported in this browser -- type it instead.");
       return;
     }
+
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e: any) {
+      setError("Couldn't access the microphone -- check Settings > Privacy > Microphone and try again.");
+      return;
+    }
+
+    try {
       const mimeType = pickRecorderMimeType();
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+        try {
+          if (e.data.size > 0) chunksRef.current.push(e.data);
+        } catch (err) {
+          setError(stepError("Capturing recording chunk", err).message);
+        }
+      };
+
+      recorder.onerror = (e: any) => {
+        setError(stepError("Recording", e?.error || e).message);
+        setListening(false);
       };
 
       recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mimeType || "audio/mp4" });
-        await transcribeBlob(blob);
+        try {
+          stream.getTracks().forEach((t) => t.stop());
+          const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mimeType || "audio/mp4" });
+          await transcribeBlob(blob);
+        } catch (e: any) {
+          setError(e?.message ? e.message : stepError("Finishing recording", e).message);
+          setListening(false);
+        }
       };
 
       recorder.start();
       mediaRecorderRef.current = recorder;
       setListening(true);
     } catch (e: any) {
-      setError("Couldn't access the microphone -- check Settings > Privacy > Microphone and try again.");
+      stream.getTracks().forEach((t) => t.stop());
+      setError(stepError("Setting up the recorder", e).message);
     }
   }
 
   function stopListening() {
-    mediaRecorderRef.current?.stop();
+    try {
+      mediaRecorderRef.current?.stop();
+    } catch (e: any) {
+      setError(stepError("Stopping recording", e).message);
+    }
     setListening(false);
   }
 
@@ -111,13 +177,31 @@ export default function LogPage() {
     setTranscribing(true);
     setError(null);
     try {
-      const audioBase64 = await blobToBase64(blob);
-      const res = await fetch("/api/transcribe", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ audioBase64, mimeType: blob.type }),
-      });
-      const data = await res.json();
+      let audioBase64: string;
+      try {
+        audioBase64 = await blobToBase64(blob);
+      } catch (e: any) {
+        throw e.message ? e : stepError("Encoding recording", e);
+      }
+
+      let res: Response;
+      try {
+        res = await fetch("/api/transcribe", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ audioBase64, mimeType: blob.type }),
+        });
+      } catch (e: any) {
+        throw stepError("Sending recording to transcription", e);
+      }
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (e: any) {
+        throw stepError("Reading transcription response", e);
+      }
+
       if (!res.ok) throw new Error(data.error || "Couldn't transcribe that");
       if (data.text) {
         setText((prev) => (prev ? `${prev} ${data.text}` : data.text));
@@ -137,12 +221,24 @@ export default function LogPage() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("/api/log-entry", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text, date }),
-      });
-      const data = await res.json();
+      let res: Response;
+      try {
+        res = await fetch("/api/log-entry", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text, date }),
+        });
+      } catch (e: any) {
+        throw stepError("Sending entry", e);
+      }
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (e: any) {
+        throw stepError("Reading log response", e);
+      }
+
       if (!res.ok) throw new Error(data.error || "Couldn't log that");
       setResult(data);
       setText("");
@@ -158,13 +254,31 @@ export default function LogPage() {
     setError(null);
     setResult(null);
     try {
-      const imageBase64 = await fileToBase64(file);
-      const res = await fetch("/api/log-entry", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ imageBase64, mediaType: file.type, text: text || undefined, date }),
-      });
-      const data = await res.json();
+      let imageBase64: string;
+      try {
+        imageBase64 = await fileToBase64(file);
+      } catch (e: any) {
+        throw e.message ? e : stepError("Encoding photo", e);
+      }
+
+      let res: Response;
+      try {
+        res = await fetch("/api/log-entry", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ imageBase64, mediaType: file.type, text: text || undefined, date }),
+        });
+      } catch (e: any) {
+        throw stepError("Sending photo", e);
+      }
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (e: any) {
+        throw stepError("Reading log response", e);
+      }
+
       if (!res.ok) throw new Error(data.error || "Couldn't log that");
       setResult(data);
       setText("");
@@ -333,16 +447,4 @@ export default function LogPage() {
       )}
     </div>
   );
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.split(",")[1]);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }

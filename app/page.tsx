@@ -20,6 +20,9 @@ import {
 const TEAL = "#3c6364";
 const CORAL = "#e16fa9";
 
+type RangeKey = "week" | "month" | "year";
+const RANGE_DAYS: Record<RangeKey, number> = { week: 7, month: 30, year: 365 };
+
 type DashboardData = {
   budget: number;
   caloriesToday: number;
@@ -48,7 +51,7 @@ type DashboardData = {
     fat_g: number | null;
   }>;
   body: Array<{ date: string; body_fat_pct: number | null; skeletal_muscle_mass_lbs: number | null; weight_lbs: number | null }>;
-  workouts: Array<{ id: string; date: string; workout_type: string; duration_min: number | null; source: string }>;
+  workouts: Array<{ id: string; date: string; workout_type: string; duration_min: number | null; calories: number | null; source: string }>;
 };
 
 // Formats a count of calories the way Courtney wants it read at a glance:
@@ -135,6 +138,34 @@ function MacroStat({ label, grams }: { label: string; grams: number }) {
   );
 }
 
+// Shared Week/Month/Year pill toggle -- used by all three trend charts so
+// each one can be looked at on its own timescale instead of being locked to
+// whatever range another chart happens to be showing.
+function RangeToggle({ value, onChange }: { value: RangeKey; onChange: (r: RangeKey) => void }) {
+  return (
+    <div className="row" style={{ gap: 6 }}>
+      {(["week", "month", "year"] as RangeKey[]).map((r) => (
+        <button
+          key={r}
+          onClick={() => onChange(r)}
+          style={{
+            padding: "5px 12px",
+            borderRadius: 20,
+            border: `1px solid ${TEAL}`,
+            background: value === r ? TEAL : "transparent",
+            color: value === r ? "#fff" : TEAL,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          {r === "week" ? "Week" : r === "month" ? "Month" : "Year"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // Custom tooltip for the Calories Burned chart -- spells out the full date,
 // formats both stacked segments (BMR baseline vs active/workout) with
 // comma-grouped whole numbers, and adds the total so the two colors are easy
@@ -192,11 +223,36 @@ function WeightTooltip({ active, payload }: any) {
   );
 }
 
+function BodyCompTooltip({ active, payload }: any) {
+  if (!active || !payload || !payload.length) return null;
+  const fullDate = payload[0]?.payload?.fullDate;
+  const bodyFat = payload.find((p: any) => p.dataKey === "bodyFat")?.value;
+  const muscle = payload.find((p: any) => p.dataKey === "muscle")?.value;
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid #f2f2f7",
+        borderRadius: 8,
+        padding: "10px 12px",
+        fontSize: 13,
+        boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>{fullDate ? formatFullDate(fullDate) : ""}</div>
+      {bodyFat != null && <div style={{ color: CORAL }}>Body fat: {bodyFat}%</div>}
+      {muscle != null && <div style={{ color: TEAL }}>Skeletal muscle: {muscle} lb</div>}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
-  const [chartRange, setChartRange] = useState<"week" | "month">("week");
+  const [burnedRange, setBurnedRange] = useState<RangeKey>("week");
+  const [weightRange, setWeightRange] = useState<RangeKey>("month");
+  const [bodyRange, setBodyRange] = useState<RangeKey>("month");
 
   const now = new Date();
   const isToday = localDateKey(selectedDate) === localDateKey(now);
@@ -233,14 +289,17 @@ export default function Dashboard() {
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening.";
 
-  const rangeDays = chartRange === "week" ? 7 : 30;
   const todayKey = localDateKey(now);
+
   // Split into resting (BMR baseline) and active (workout burn) so the chart
   // can stack them in two colors -- Courtney wants to see how much of her
   // daily burn is just existing (BMR) vs. actually working out. On today's
   // own bar, if resting hasn't synced yet, fall back to the same estimate
   // the stat card uses instead of showing a bar that's collapsed to zero.
-  const inVsBurned = (data?.metrics || []).slice(-rangeDays).map((m) => {
+  // `metrics` now comes back from the API already bounded to ~400 days, so
+  // slicing the last N here is always a genuine rolling window (last 7 /
+  // last 30 / last 365 days), never a calendar-month cutoff.
+  const inVsBurned = (data?.metrics || []).slice(-RANGE_DAYS[burnedRange]).map((m) => {
     const isTodayRow = m.date === todayKey;
     const resting =
       m.resting_calories ?? (isTodayRow && data?.bmrToday != null ? data.bmrToday : 0);
@@ -252,20 +311,22 @@ export default function Dashboard() {
     };
   });
 
-  const bodyTrend = (data?.body || []).map((b) => ({
+  const bodyTrendAll = (data?.body || []).map((b) => ({
     date: b.date.slice(5),
     fullDate: b.date,
     bodyFat: b.body_fat_pct,
     muscle: b.skeletal_muscle_mass_lbs,
   }));
+  const bodyTrend = bodyTrendAll.slice(-RANGE_DAYS[bodyRange]);
 
-  const weightTrend = (data?.body || [])
+  const weightTrendAll = (data?.body || [])
     .filter((b) => b.weight_lbs != null)
     .map((b) => ({
       date: b.date.slice(5),
       fullDate: b.date,
       weight: b.weight_lbs,
     }));
+  const weightTrend = weightTrendAll.slice(-RANGE_DAYS[weightRange]);
 
   return (
     <div className="container">
@@ -383,38 +444,7 @@ export default function Dashboard() {
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <h2 style={{ margin: 0 }}>Calories Burned</h2>
-          <div className="row" style={{ gap: 6 }}>
-            <button
-              onClick={() => setChartRange("week")}
-              style={{
-                padding: "5px 12px",
-                borderRadius: 20,
-                border: `1px solid ${TEAL}`,
-                background: chartRange === "week" ? TEAL : "transparent",
-                color: chartRange === "week" ? "#fff" : TEAL,
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              Week
-            </button>
-            <button
-              onClick={() => setChartRange("month")}
-              style={{
-                padding: "5px 12px",
-                borderRadius: 20,
-                border: `1px solid ${TEAL}`,
-                background: chartRange === "month" ? TEAL : "transparent",
-                color: chartRange === "month" ? "#fff" : TEAL,
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              Month
-            </button>
-          </div>
+          <RangeToggle value={burnedRange} onChange={setBurnedRange} />
         </div>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={inVsBurned}>
@@ -433,7 +463,10 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
-        <h2>Weight Trend</h2>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <h2 style={{ margin: 0 }}>Weight Trend</h2>
+          <RangeToggle value={weightRange} onChange={setWeightRange} />
+        </div>
         {weightTrend.length === 0 ? (
           <div className="empty">Log a weight entry to see your trend.</div>
         ) : (
@@ -450,7 +483,10 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
-        <h2>Body Composition Trend</h2>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <h2 style={{ margin: 0 }}>Body Composition Trend</h2>
+          <RangeToggle value={bodyRange} onChange={setBodyRange} />
+        </div>
         {bodyTrend.length === 0 ? (
           <div className="empty">Add an InBody scan to see trends.</div>
         ) : (
@@ -459,7 +495,7 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f2f2f7" />
               <XAxis dataKey="date" fontSize={11} stroke="#86868b" />
               <YAxis fontSize={11} stroke="#86868b" />
-              <Tooltip />
+              <Tooltip content={<BodyCompTooltip />} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Line type="monotone" dataKey="bodyFat" name="Body fat %" stroke={CORAL} strokeWidth={2} dot={false} />
               <Line type="monotone" dataKey="muscle" name="Skeletal muscle (lb)" stroke={TEAL} strokeWidth={2} dot={false} />
@@ -476,8 +512,13 @@ export default function Dashboard() {
             <span>
               {w.workout_type} <span className="subtle">· {w.date.slice(5)}</span>
             </span>
-            <span className={`pill ${w.source === "calendar" ? "pill-blue" : "pill-green"}`}>
-              {w.duration_min ? `${w.duration_min} min` : w.source}
+            <span style={{ textAlign: "right" }}>
+              <span className={`pill ${w.source === "calendar" ? "pill-blue" : "pill-green"}`}>
+                {w.duration_min ? `${w.duration_min} min` : w.source}
+              </span>
+              <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>
+                {w.calories ? `${formatCal(w.calories)} cal` : "—"}
+              </div>
             </span>
           </div>
         ))}

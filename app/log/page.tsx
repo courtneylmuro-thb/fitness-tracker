@@ -65,6 +65,7 @@ export default function LogPage() {
   // "How I feel" -- stored for future graphing, nothing displayed from it yet.
   const [feelingScore, setFeelingScore] = useState<number | null>(null);
   const [feelingSaved, setFeelingSaved] = useState(false);
+  const [feelingError, setFeelingError] = useState<string | null>(null);
   const [feelingSaving, setFeelingSaving] = useState(false);
 
   async function startListening() {
@@ -174,17 +175,27 @@ export default function LogPage() {
     }
   }
 
+  // Was silently failing before: if the fetch itself threw (network drop,
+  // etc.) or the response wasn't ok, nothing told Courtney it didn't save --
+  // feelingSaved just stayed false with no visible error, so a real failure
+  // looked identical to "haven't tapped a number yet." Now every path ends
+  // in either a clear saved state or a clear, visible error.
   async function saveFeeling(score: number) {
     setFeelingScore(score);
     setFeelingSaving(true);
     setFeelingSaved(false);
+    setFeelingError(null);
     try {
       const res = await fetch("/api/mood", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ date, feelingScore: score }),
       });
-      if (res.ok) setFeelingSaved(true);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Didn't save -- try tapping it again.");
+      setFeelingSaved(true);
+    } catch (e: any) {
+      setFeelingError(e.message || "Didn't save -- try tapping it again.");
     } finally {
       setFeelingSaving(false);
     }
@@ -257,9 +268,25 @@ export default function LogPage() {
             </button>
           ))}
         </div>
-        <div className="subtle" style={{ marginTop: 10 }}>
-          {feelingSaving ? "Saving…" : feelingSaved ? "Saved -- we'll use this for trends later." : "1 = rough, 10 = amazing."}
-        </div>
+        {feelingError ? (
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 6, color: "#c0392b", fontWeight: 600, fontSize: 13 }}>
+            ✕ {feelingError}
+          </div>
+        ) : (
+          <div
+            style={{
+              marginTop: 10,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+              fontWeight: feelingSaved ? 700 : 400,
+              color: feelingSaved ? "#3c6364" : "#86868b",
+            }}
+          >
+            {feelingSaving ? "Saving…" : feelingSaved ? `✓ Saved ${feelingScore}/10 for today.` : "1 = rough, 10 = amazing."}
+          </div>
+        )}
       </div>
 
       {error && (

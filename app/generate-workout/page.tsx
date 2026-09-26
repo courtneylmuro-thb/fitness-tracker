@@ -25,48 +25,103 @@ function localDateStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Native browser speech-to-text -- same pattern used on the Log page. No
-// external transcription service, just the built-in Web Speech API.
-function useSpeech(onFinal: (text: string) => void) {
-  const [listening, setListening] = useState(false);
-  const recRef = useRef<any>(null);
+// iOS Safari (and every other iOS browser, since Apple forces them all onto
+// WebKit) never implemented the Web Speech API this hook used to rely on --
+// SpeechRecognition/webkitSpeechRecognition simply doesn't exist there, so
+// the mic button did nothing (or silently failed) on Courtney's phone, which
+// is the only place she actually uses this page. Replaced with the same
+// working pattern already used on the Log page: record with MediaRecorder,
+// send the audio to /api/transcribe, which calls Groq's hosted Whisper.
+function pickRecorderMimeType(): string {
+  if (typeof MediaRecorder === "undefined") return "";
+  const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg"];
+  for (const type of candidates) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return "";
+}
 
-  const start = () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function useVoiceInput(onFinal: (text: string) => void) {
+  const [listening, setListening] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+
+  async function start() {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       alert("Voice input isn't supported in this browser -- try typing instead.");
       return;
     }
-    const rec = new SR();
-    rec.lang = "en-US";
-    rec.continuous = false;
-    rec.interimResults = false;
-    rec.onresult = (e: any) => {
-      const transcript = Array.from(e.results)
-        .map((r: any) => r[0].transcript)
-        .join(" ");
-      onFinal(transcript);
-    };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => setListening(false);
-    recRef.current = rec;
-    rec.start();
-    setListening(true);
-  };
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = pickRecorderMimeType();
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      chunksRef.current = [];
 
-  const stop = () => {
-    recRef.current?.stop();
-    setListening(false);
-  };
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
 
-  return { listening, start, stop };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || mimeType || "audio/mp4" });
+        setListening(false);
+        if (blob.size === 0) return;
+        setTranscribing(true);
+        try {
+          const audioBase64 = await blobToBase64(blob);
+          const res = await fetch("/api/transcribe", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ audioBase64, mimeType: blob.type }),
+          });
+          const data = await res.json();
+          if (res.ok && data.text) onFinal(data.text);
+        } catch {
+          // Transcription failed -- Courtney can just type it instead.
+        } finally {
+          setTranscribing(false);
+        }
+      };
+
+      recorder.start();
+      recorderRef.current = recorder;
+      setListening(true);
+    } catch {
+      alert("Couldn't access the microphone -- check Settings > Privacy > Microphone and try again.");
+    }
+  }
+
+  function stop() {
+    recorderRef.current?.stop();
+  }
+
+  return { listening, transcribing, start, stop };
 }
 
-function MicButton({ listening, onClick }: { listening: boolean; onClick: () => void }) {
+function MicButton({
+  listening,
+  transcribing,
+  onClick,
+}: {
+  listening: boolean;
+  transcribing?: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={transcribing}
       style={{
         border: "none",
         borderRadius: 999,
@@ -76,15 +131,16 @@ function MicButton({ listening, onClick }: { listening: boolean; onClick: () => 
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        fontSize: 18,
-        cursor: "pointer",
+        fontSize: listening || transcribing ? 14 : 18,
+        cursor: transcribing ? "default" : "pointer",
         background: listening ? CORAL : TEAL,
         color: "#fff",
+        opacity: transcribing ? 0.7 : 1,
       }}
-      aria-label={listening ? "Stop recording" : "Speak"}
-      title={listening ? "Stop recording" : "Speak"}
+      aria-label={listening ? "Stop recording" : transcribing ? "Transcribing" : "Speak"}
+      title={listening ? "Stop recording" : transcribing ? "Transcribing…" : "Speak"}
     >
-      {listening ? "■" : "🎤"}
+      {listening ? "■" : transcribing ? "…" : "🎤"}
     </button>
   );
 }
@@ -129,8 +185,8 @@ export default function GenerateWorkoutPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [bubbles, loading, workout, showFeedback, logged]);
 
-  const composerSpeech = useSpeech((text) => setInput((prev) => (prev ? `${prev} ${text}` : text)));
-  const feedbackSpeech = useSpeech((text) => setFeedbackNotes((prev) => (prev ? `${prev} ${text}` : text)));
+  const composerSpeech = useVoiceInput((text) => setInput((prev) => (prev ? `${prev} ${text}` : text)));
+  const feedbackSpeech = useVoiceInput((text) => setFeedbackNotes((prev) => (prev ? `${prev} ${text}` : text)));
 
   async function send(textOverride?: string) {
     const text = (textOverride ?? input).trim();
@@ -258,7 +314,7 @@ export default function GenerateWorkoutPage() {
           onKeyDown={(e) => {
             if (e.key === "Enter") send();
           }}
-          placeholder="I'm at my home gym, want a 25 min workout for my butt…"
+          placeholder={composerSpeech.transcribing ? "Transcribing…" : "I'm at my home gym, want a 25 min workout for my butt…"}
           style={{
             flex: 1,
             padding: "10px 14px",
@@ -268,7 +324,11 @@ export default function GenerateWorkoutPage() {
             outline: "none",
           }}
         />
-        <MicButton listening={composerSpeech.listening} onClick={() => (composerSpeech.listening ? composerSpeech.stop() : composerSpeech.start())} />
+        <MicButton
+          listening={composerSpeech.listening}
+          transcribing={composerSpeech.transcribing}
+          onClick={() => (composerSpeech.listening ? composerSpeech.stop() : composerSpeech.start())}
+        />
         <button
           onClick={() => send()}
           disabled={loading || !input.trim()}
@@ -348,11 +408,12 @@ export default function GenerateWorkoutPage() {
                 <input
                   value={feedbackNotes}
                   onChange={(e) => setFeedbackNotes(e.target.value)}
-                  placeholder="e.g. felt easy, took 45 min instead of 30"
+                  placeholder={feedbackSpeech.transcribing ? "Transcribing…" : "e.g. felt easy, took 45 min instead of 30"}
                   style={{ flex: 1, padding: "10px 14px", borderRadius: 999, border: `1px solid ${BORDER}`, fontSize: 14 }}
                 />
                 <MicButton
                   listening={feedbackSpeech.listening}
+                  transcribing={feedbackSpeech.transcribing}
                   onClick={() => (feedbackSpeech.listening ? feedbackSpeech.stop() : feedbackSpeech.start())}
                 />
               </div>

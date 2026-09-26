@@ -7,6 +7,51 @@
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-5";
 
+// Best-effort repair for a specific, observed failure mode: the model emits an
+// unescaped, literal double-quote character inside a JSON string value (e.g. a
+// "decorative" quote around a word, or quoting something someone said) instead
+// of escaping it as \". A naive JSON.parse throws immediately on that ("Expected
+// ',' or '}' after property value" -- exactly the crash this was built to fix).
+// This walks the raw text character by character, tracking whether we're inside
+// a string, and when it hits a quote that isn't escaped, it peeks ahead past
+// whitespace to decide whether that quote is really closing the string (next
+// non-space char is a JSON structural character: , } ] or :) or whether it's a
+// stray literal quote embedded mid-string -- in which case it escapes it
+// instead of letting it terminate the string early and corrupt the rest of
+// the parse.
+function repairStrayQuotes(raw: string): string {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === "\\" && inString) {
+      out += ch + (raw[i + 1] ?? "");
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      if (!inString) {
+        inString = true;
+        out += ch;
+        continue;
+      }
+      let j = i + 1;
+      while (j < raw.length && /\s/.test(raw[j])) j++;
+      const next = raw[j];
+      const looksLikeRealClose = next === undefined || [",", "}", "]", ":"].includes(next);
+      if (looksLikeRealClose) {
+        inString = false;
+        out += ch;
+      } else {
+        out += '\\"';
+      }
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 // Low-level call: takes a full messages array (for multi-turn conversations) plus
 // an optional system prompt, and returns the parsed JSON the model was asked to
 // respond with.
@@ -44,7 +89,24 @@ async function callClaudeMessages(
   const textBlock = blocks.find((b) => b && b.type === "text" && typeof b.text === "string");
   const text = textBlock?.text ?? "{}";
   const match = text.match(/\{[\s\S]*\}/);
-  return JSON.parse(match ? match[0] : text);
+  const candidate = match ? match[0] : text;
+
+  // Try the raw candidate first (the common case, no repair needed). If that
+  // throws, retry once against a repaired version that escapes stray literal
+  // quotes inside string values. If even that fails, surface a clear error
+  // with a snippet of the offending text instead of a bare "Unexpected token"
+  // with no context, so a real parse failure is at least diagnosable.
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    try {
+      return JSON.parse(repairStrayQuotes(candidate));
+    } catch (err) {
+      throw new Error(
+        `Couldn't parse the model's JSON response (${String(err)}). Raw response started with: ${candidate.slice(0, 300)}`
+      );
+    }
+  }
 }
 
 // Single-user-turn convenience wrapper used by all the single-shot estimators below.

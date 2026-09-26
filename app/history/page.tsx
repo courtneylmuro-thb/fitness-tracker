@@ -2,6 +2,15 @@
 
 import { useEffect, useState } from "react";
 
+type Entry = {
+  id: string;
+  description: string;
+  estimated_calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+};
+
 type DayRow = {
   date: string;
   calories: number;
@@ -9,7 +18,7 @@ type DayRow = {
   carbs: number;
   fat: number;
   count: number;
-  entries: { id: string; description: string; estimated_calories: number | null }[];
+  entries: Entry[];
 };
 
 function formatFullDate(iso: string): string {
@@ -96,7 +105,14 @@ export default function HistoryPage() {
                 {d.entries.map((e) => (
                   <div key={e.id} className="food-entry">
                     <span>{e.description}</span>
-                    <span>{e.estimated_calories ? `${Math.round(e.estimated_calories)} cal` : "—"}</span>
+                    <span style={{ textAlign: "right" }}>
+                      <span>{e.estimated_calories ? `${Math.round(e.estimated_calories)} cal` : "—"}</span>
+                      {(e.protein_g || e.carbs_g || e.fat_g) && (
+                        <div className="subtle" style={{ fontSize: 11 }}>
+                          {Math.round(e.protein_g ?? 0)}p · {Math.round(e.carbs_g ?? 0)}c · {Math.round(e.fat_g ?? 0)}f
+                        </div>
+                      )}
+                    </span>
                   </div>
                 ))}
               </div>

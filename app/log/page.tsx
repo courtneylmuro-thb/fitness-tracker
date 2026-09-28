@@ -1,8 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+
+const TEAL = "#3c6364";
 
 type LogResult = {
+  id?: string;
   type: "food" | "workout" | "weight" | "period";
   description?: string;
   estimated_calories?: number;
@@ -14,6 +18,16 @@ type LogResult = {
   weight_lbs?: number | null;
   flow?: string | null;
   notes?: string | null;
+};
+
+type SavedFood = {
+  id: string;
+  name: string;
+  description: string | null;
+  calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
 };
 
 function localDateStr(): string {
@@ -106,6 +120,30 @@ export default function LogPage() {
   const [feelingSaved, setFeelingSaved] = useState(false);
   const [feelingError, setFeelingError] = useState<string | null>(null);
   const [feelingSaving, setFeelingSaving] = useState(false);
+
+  // Saved-foods lookup as she types (Feature 3) -- tap a match to log it
+  // instantly with its stored macros instead of waiting on a fresh AI estimate.
+  const [matches, setMatches] = useState<SavedFood[]>([]);
+  const [saveName, setSaveName] = useState<string | null>(null);
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const q = text.trim();
+    if (q.length < 2) {
+      setMatches([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/saved-foods?q=${encodeURIComponent(q)}`);
+        if (res.ok) setMatches(await res.json());
+      } catch {
+        // best-effort suggestion lookup -- ignore failures
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [text]);
 
   async function startListening() {
     setError(null);
@@ -215,6 +253,14 @@ export default function LogPage() {
     }
   }
 
+  function afterLog(data: LogResult) {
+    setResult(data);
+    setText("");
+    setMatches([]);
+    setSaveName(null);
+    setSaveNote(null);
+  }
+
   async function submitText() {
     if (!text.trim()) return;
     setLoading(true);
@@ -240,8 +286,7 @@ export default function LogPage() {
       }
 
       if (!res.ok) throw new Error(data.error || "Couldn't log that");
-      setResult(data);
-      setText("");
+      afterLog(data);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -280,12 +325,61 @@ export default function LogPage() {
       }
 
       if (!res.ok) throw new Error(data.error || "Couldn't log that");
-      setResult(data);
-      setText("");
+      afterLog(data);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function logSaved(f: SavedFood) {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await fetch("/api/log-entry", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ saved: f, date }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't log that");
+      afterLog(data);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveAsFood() {
+    if (!result || !saveName?.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/saved-foods", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: saveName.trim(),
+          description: result.description,
+          calories: result.estimated_calories,
+          protein_g: result.protein_g,
+          carbs_g: result.carbs_g,
+          fat_g: result.fat_g,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error || "Couldn't save");
+      }
+      setSaveNote(`Saved to My Foods as "${saveName.trim()}" ✓`);
+      setSaveName(null);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -319,7 +413,12 @@ export default function LogPage() {
 
   return (
     <div className="container">
-      <div className="greeting">Log</div>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div className="greeting">Log</div>
+        <Link href="/ask" style={{ color: TEAL, fontSize: 13, textDecoration: "none" }}>
+          Have a question? Ask →
+        </Link>
+      </div>
       <div className="subtle" style={{ marginBottom: 16 }}>
         Food, workout, weigh-in, or period note -- say it, type it, or snap a photo, doesn't need to be precise.
       </div>
@@ -331,6 +430,38 @@ export default function LogPage() {
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
+
+        {matches.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div className="subtle" style={{ marginBottom: 6 }}>
+              From your saved foods — tap to log:
+            </div>
+            {matches.slice(0, 5).map((f) => (
+              <button
+                key={f.id}
+                onClick={() => logSaved(f)}
+                disabled={loading}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  border: "1px solid #e0ddd6",
+                  borderRadius: 8,
+                  background: "#fff",
+                  padding: "8px 12px",
+                  marginBottom: 6,
+                  cursor: loading ? "default" : "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ fontWeight: 600 }}>{f.name}</span>
+                <span className="subtle">{f.calories != null ? `${Math.round(f.calories)} cal` : ""}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <div className="row" style={{ marginBottom: 12 }}>
           <button
@@ -417,6 +548,37 @@ export default function LogPage() {
             {Math.round(result.estimated_calories ?? 0)} cal · {Math.round(result.protein_g ?? 0)}g protein ·{" "}
             {Math.round(result.carbs_g ?? 0)}g carbs · {Math.round(result.fat_g ?? 0)}g fat
           </div>
+
+          {saveNote ? (
+            <div className="subtle" style={{ marginTop: 12, color: "#248a3d" }}>
+              {saveNote}
+            </div>
+          ) : saveName === null ? (
+            <button
+              className="btn btn-secondary"
+              style={{ marginTop: 12 }}
+              onClick={() => setSaveName(result.description || "")}
+            >
+              ⭐ Save as my food
+            </button>
+          ) : (
+            <div style={{ marginTop: 12 }}>
+              <input
+                type="text"
+                placeholder="Name it, e.g. Brown Rice Ginger Salad"
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+              />
+              <div className="row">
+                <button className="btn btn-secondary" onClick={() => setSaveName(null)} disabled={saving}>
+                  Cancel
+                </button>
+                <button className="btn" disabled={!saveName.trim() || saving} onClick={saveAsFood}>
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -23,6 +23,15 @@ const CORAL = "#e16fa9";
 type RangeKey = "week" | "month" | "year";
 const RANGE_DAYS: Record<RangeKey, number> = { week: 7, month: 30, year: 365 };
 
+type FoodToday = {
+  id: string;
+  description: string;
+  estimated_calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+};
+
 type DashboardData = {
   budget: number;
   caloriesToday: number;
@@ -42,14 +51,7 @@ type DashboardData = {
     weight_lbs: number | null;
     steps: number | null;
   }>;
-  foodToday: Array<{
-    id: string;
-    description: string;
-    estimated_calories: number | null;
-    protein_g: number | null;
-    carbs_g: number | null;
-    fat_g: number | null;
-  }>;
+  foodToday: FoodToday[];
   body: Array<{ date: string; body_fat_pct: number | null; skeletal_muscle_mass_lbs: number | null; weight_lbs: number | null }>;
   workouts: Array<{ id: string; date: string; workout_type: string; duration_min: number | null; calories: number | null; source: string }>;
 };
@@ -172,11 +174,6 @@ function RangeToggle({ value, onChange }: { value: RangeKey; onChange: (r: Range
 // to compare against each other.
 function BurnedTooltip({ active, payload }: any) {
   if (!active || !payload || !payload.length) return null;
-  // Recharts hands this component the XAxis's own dataKey value as `label`
-  // (the short "08-31" tick text), not the full ISO date -- pulling the real
-  // date off `payload[0].payload.fullDate` (the original data row) instead
-  // is what actually produces "September 02, 2026" rather than garbage from
-  // trying to parse "08-31" as a y-m-d.
   const fullDate = payload[0]?.payload?.fullDate;
   const resting = payload.find((p: any) => p.dataKey === "resting")?.value ?? 0;
   const activeVal = payload.find((p: any) => p.dataKey === "active")?.value ?? 0;
@@ -254,10 +251,17 @@ export default function Dashboard() {
   const [weightRange, setWeightRange] = useState<RangeKey>("month");
   const [bodyRange, setBodyRange] = useState<RangeKey>("month");
 
+  // Edit/Delete state for the Today's Food list (Feature 2).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDesc, setEditDesc] = useState("");
+  const [editCal, setEditCal] = useState("");
+  const [rowBusy, setRowBusy] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
+
   const now = new Date();
   const isToday = localDateKey(selectedDate) === localDateKey(now);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     const { localDate, dayStart, dayEnd } = dayParams(selectedDate);
     fetch(
       `/api/dashboard-data?date=${localDate}&dayStart=${encodeURIComponent(dayStart)}&dayEnd=${encodeURIComponent(dayEnd)}`
@@ -265,7 +269,12 @@ export default function Dashboard() {
       .then((r) => r.json())
       .then(setData)
       .catch((e) => setError(String(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   function goPrevDay() {
     setSelectedDate((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1));
@@ -283,6 +292,55 @@ export default function Dashboard() {
     if (!value) return;
     const [y, m, d] = value.split("-").map(Number);
     setSelectedDate(new Date(y, m - 1, d));
+  }
+
+  function startEdit(f: FoodToday) {
+    setRowError(null);
+    setEditingId(f.id);
+    setEditDesc(f.description);
+    setEditCal(f.estimated_calories != null ? String(Math.round(f.estimated_calories)) : "");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setRowError(null);
+  }
+
+  async function saveEdit(id: string) {
+    setRowBusy(true);
+    setRowError(null);
+    try {
+      const res = await fetch(`/api/food-log/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ description: editDesc, estimated_calories: editCal }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "Couldn't save");
+      setEditingId(null);
+      load();
+    } catch (e: any) {
+      setRowError(e.message || "Couldn't save");
+    } finally {
+      setRowBusy(false);
+    }
+  }
+
+  async function deleteEntry(id: string) {
+    if (!confirm("Delete this food entry?")) return;
+    setRowBusy(true);
+    setRowError(null);
+    try {
+      const res = await fetch(`/api/food-log/${id}`, { method: "DELETE" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "Couldn't delete");
+      if (editingId === id) setEditingId(null);
+      load();
+    } catch (e: any) {
+      setRowError(e.message || "Couldn't delete");
+    } finally {
+      setRowBusy(false);
+    }
   }
 
   const dateStr = formatFullDate(localDateKey(selectedDate));
@@ -426,19 +484,77 @@ export default function Dashboard() {
       <div className="card">
         <h2>{isToday ? "Today's Food" : "Food logged"}</h2>
         {(data?.foodToday?.length ?? 0) === 0 && <div className="empty">Nothing logged {isToday ? "yet today" : "that day"}.</div>}
-        {data?.foodToday.map((f) => (
-          <div key={f.id} className="food-entry">
-            <span>{f.description}</span>
-            <span style={{ textAlign: "right" }}>
-              <span>{f.estimated_calories ? `${formatCal(f.estimated_calories)} cal` : "—"}</span>
-              {(f.protein_g || f.carbs_g || f.fat_g) && (
-                <div className="subtle" style={{ fontSize: 11 }}>
-                  {Math.round(f.protein_g ?? 0)}p · {Math.round(f.carbs_g ?? 0)}c · {Math.round(f.fat_g ?? 0)}f
-                </div>
-              )}
-            </span>
-          </div>
-        ))}
+        {rowError && <div style={{ color: "#b3261e", fontSize: 13, marginBottom: 8 }}>{rowError}</div>}
+        {data?.foodToday.map((f) =>
+          editingId === f.id ? (
+            <div
+              key={f.id}
+              style={{
+                border: "1px solid #e0ddd6",
+                borderRadius: 8,
+                padding: 10,
+                marginBottom: 8,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <input
+                type="text"
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                placeholder="Description"
+                style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #e0ddd6", fontSize: 14 }}
+              />
+              <input
+                type="text"
+                inputMode="numeric"
+                value={editCal}
+                onChange={(e) => setEditCal(e.target.value.replace(/[^0-9]/g, ""))}
+                placeholder="Calories"
+                style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #e0ddd6", fontSize: 14, width: 120 }}
+              />
+              <div className="row" style={{ gap: 8 }}>
+                <button className="btn btn-secondary" onClick={cancelEdit} disabled={rowBusy}>
+                  Cancel
+                </button>
+                <button className="btn" onClick={() => saveEdit(f.id)} disabled={rowBusy}>
+                  Save
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div key={f.id} className="food-entry">
+              <span style={{ flex: 1, minWidth: 0 }}>{f.description}</span>
+              <span style={{ textAlign: "right", display: "flex", alignItems: "center", gap: 6 }}>
+                <span>
+                  <span>{f.estimated_calories ? `${formatCal(f.estimated_calories)} cal` : "—"}</span>
+                  {(f.protein_g || f.carbs_g || f.fat_g) && (
+                    <div className="subtle" style={{ fontSize: 11 }}>
+                      {Math.round(f.protein_g ?? 0)}p · {Math.round(f.carbs_g ?? 0)}c · {Math.round(f.fat_g ?? 0)}f
+                    </div>
+                  )}
+                </span>
+                <button
+                  onClick={() => startEdit(f)}
+                  disabled={rowBusy}
+                  aria-label="Edit entry"
+                  style={{ border: "none", background: "transparent", color: TEAL, fontSize: 13, cursor: "pointer", padding: 4 }}
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => deleteEntry(f.id)}
+                  disabled={rowBusy}
+                  aria-label="Delete entry"
+                  style={{ border: "none", background: "transparent", color: "#b3261e", fontSize: 14, cursor: "pointer", padding: 4 }}
+                >
+                  🗑
+                </button>
+              </span>
+            </div>
+          )
+        )}
       </div>
 
       <div className="card">

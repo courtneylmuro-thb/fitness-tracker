@@ -7,11 +7,13 @@ import { useEffect, useState } from "react";
 const links = [
   { href: "/", label: "Dashboard" },
   { href: "/log", label: "Log" },
+  { href: "/ask", label: "Ask" },
   { href: "/scan", label: "Body Scan" },
   { href: "/one-rep-max", label: "1-Rep Max" },
   { href: "/photos", label: "Photos" },
   { href: "/generate-workout", label: "AI Workout" },
   { href: "/history", label: "Food History" },
+  { href: "/foods", label: "My Foods" },
 ];
 
 export default function NavBar() {

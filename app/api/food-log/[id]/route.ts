@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
-// Edit a food entry (portion size / description) or delete it entirely.
+// Edit a food entry (portion size / description / date) or delete it entirely.
 // Used by the "Today's Food" list on the dashboard.
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
@@ -14,6 +14,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (body.protein_g != null && body.protein_g !== "") updates.protein_g = Number(body.protein_g);
     if (body.carbs_g != null && body.carbs_g !== "") updates.carbs_g = Number(body.carbs_g);
     if (body.fat_g != null && body.fat_g !== "") updates.fat_g = Number(body.fat_g);
+    // Moving an entry to a different day. `date` comes in as a plain
+    // YYYY-MM-DD from the dashboard's <input type="date">; store it at noon
+    // local-ish (matching the same convention the log-entry route uses for
+    // manually-dated entries) so it isn't sensitive to timezone rollover.
+    if (typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
+      updates.logged_at = `${body.date}T12:00:00`;
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "Nothing to change" }, { status: 400 });

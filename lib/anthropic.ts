@@ -140,16 +140,23 @@ async function callClaudeMessages(
     const retryText = await callOnce(retryMessages, maxTokens, system);
     const retryAttempt = tryParseJson(retryText);
     if (retryAttempt.ok) return retryAttempt.value;
+    // Cast explicitly rather than relying on control-flow narrowing here --
+    // TypeScript doesn't reliably preserve the false-branch narrowing of a
+    // discriminated union across this try/catch boundary, which was failing
+    // the production type-check build (though not local dev) with "Property
+    // 'err' does not exist on type ...".
+    const retryFail = retryAttempt as { ok: false; candidate: string; err: unknown };
     throw new Error(
-      `Couldn't parse the model's JSON response (${String(retryAttempt.err)}). Raw response started with: ${retryAttempt.candidate.slice(0, 300)}`
+      `Couldn't parse the model's JSON response (${String(retryFail.err)}). Raw response started with: ${retryFail.candidate.slice(0, 300)}`
     );
   } catch (err: any) {
     if (err instanceof Error && err.message.startsWith("Couldn't parse")) throw err;
     // The retry call itself failed (network/API error) rather than producing
     // bad JSON -- surface the original parse failure, which is still the
-    // most useful information available.
+    // most useful information available. Same explicit-cast reasoning as above.
+    const firstFail = firstAttempt as { ok: false; candidate: string; err: unknown };
     throw new Error(
-      `Couldn't parse the model's JSON response (${String(firstAttempt.err)}). Raw response started with: ${firstAttempt.candidate.slice(0, 300)}`
+      `Couldn't parse the model's JSON response (${String(firstFail.err)}). Raw response started with: ${firstFail.candidate.slice(0, 300)}`
     );
   }
 }

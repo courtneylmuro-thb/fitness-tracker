@@ -4,7 +4,27 @@ import { estimateLogEntry } from "@/lib/anthropic";
 
 export async function POST(req: NextRequest) {
   try {
-    const { text, imageBase64, mediaType, date } = await req.json();
+    const { text, imageBase64, mediaType, date, saved } = await req.json();
+
+    // Logging a previously saved food/recipe: skip the AI estimate entirely and
+    // insert its stored macros directly. This is checked before the
+    // text/imageBase64 requirement below since a saved-food log needs neither.
+    if (saved) {
+      const supabase = getSupabaseAdmin();
+      const insertRow: Record<string, any> = {
+        description: saved.description || saved.name || "Saved food",
+        estimated_calories: saved.calories ?? null,
+        protein_g: saved.protein_g ?? null,
+        carbs_g: saved.carbs_g ?? null,
+        fat_g: saved.fat_g ?? null,
+        source: "saved",
+      };
+      if (date) insertRow.logged_at = `${date}T12:00:00`;
+      const { data, error } = await supabase.from("food_logs").insert(insertRow).select().single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ type: "food", ...data });
+    }
+
     if (!text && !imageBase64) {
       return NextResponse.json({ error: "Say it, type it, or snap a photo" }, { status: 400 });
     }

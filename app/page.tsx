@@ -30,6 +30,7 @@ type FoodToday = {
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
+  logged_at: string;
 };
 
 type DashboardData = {
@@ -251,10 +252,13 @@ export default function Dashboard() {
   const [weightRange, setWeightRange] = useState<RangeKey>("month");
   const [bodyRange, setBodyRange] = useState<RangeKey>("month");
 
-  // Edit/Delete state for the Today's Food list (Feature 2).
+  // Edit/Delete state for the Today's Food list (Feature 2). editDate lets
+  // Courtney move an entry logged under the wrong day to the right one --
+  // e.g. something typed in today that actually happened yesterday.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDesc, setEditDesc] = useState("");
   const [editCal, setEditCal] = useState("");
+  const [editDate, setEditDate] = useState("");
   const [rowBusy, setRowBusy] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -299,6 +303,9 @@ export default function Dashboard() {
     setEditingId(f.id);
     setEditDesc(f.description);
     setEditCal(f.estimated_calories != null ? String(Math.round(f.estimated_calories)) : "");
+    // logged_at comes back as a full timestamp (e.g. "2026-09-28T12:00:00");
+    // the date input only wants the leading YYYY-MM-DD.
+    setEditDate((f.logged_at || "").slice(0, 10) || localDateKey(selectedDate));
   }
 
   function cancelEdit() {
@@ -313,7 +320,7 @@ export default function Dashboard() {
       const res = await fetch(`/api/food-log/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ description: editDesc, estimated_calories: editCal }),
+        body: JSON.stringify({ description: editDesc, estimated_calories: editCal, date: editDate }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || "Couldn't save");
@@ -506,14 +513,23 @@ export default function Dashboard() {
                 placeholder="Description"
                 style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #e0ddd6", fontSize: 14 }}
               />
-              <input
-                type="text"
-                inputMode="numeric"
-                value={editCal}
-                onChange={(e) => setEditCal(e.target.value.replace(/[^0-9]/g, ""))}
-                placeholder="Calories"
-                style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #e0ddd6", fontSize: 14, width: 120 }}
-              />
+              <div className="row" style={{ gap: 8 }}>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={editCal}
+                  onChange={(e) => setEditCal(e.target.value.replace(/[^0-9]/g, ""))}
+                  placeholder="Calories"
+                  style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #e0ddd6", fontSize: 14, width: 120 }}
+                />
+                <input
+                  type="date"
+                  value={editDate}
+                  max={localDateKey(now)}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #e0ddd6", fontSize: 14 }}
+                />
+              </div>
               <div className="row" style={{ gap: 8 }}>
                 <button className="btn btn-secondary" onClick={cancelEdit} disabled={rowBusy}>
                   Cancel

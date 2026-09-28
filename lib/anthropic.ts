@@ -1,7 +1,7 @@
 // Thin wrapper around the Anthropic Messages API for estimating food calories/macros,
 // classifying/parsing food-or-workout-or-weight-or-period log entries, reading InBody
-// screenshots and scale photos, and generating on-demand workouts (single-shot or
-// conversational).
+// screenshots and scale photos, generating on-demand workouts (single-shot or
+// conversational), and answering free-form nutrition/fitness questions (the Ask coach).
 // Uses fetch directly so we don't need the SDK as a dependency.
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
@@ -52,14 +52,15 @@ function repairStrayQuotes(raw: string): string {
   return out;
 }
 
-// Low-level call: takes a full messages array (for multi-turn conversations) plus
-// an optional system prompt, and returns the parsed JSON the model was asked to
-// respond with.
-async function callClaudeMessages(
+// One raw call to the API -- just the network round trip, returns the first
+// real text block. Split out from callClaudeMessages so the retry path below
+// can call it twice against different message arrays without duplicating the
+// fetch/header/response-shape boilerplate.
+async function callOnce(
   messages: { role: "user" | "assistant"; content: any }[],
-  maxTokens = 800,
+  maxTokens: number,
   system?: string
-) {
+): Promise<string> {
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
     headers: {
@@ -87,31 +88,75 @@ async function callClaudeMessages(
   // thinking block was silently producing an empty {} result.
   const blocks: any[] = Array.isArray(data.content) ? data.content : [];
   const textBlock = blocks.find((b) => b && b.type === "text" && typeof b.text === "string");
-  const text = textBlock?.text ?? "{}";
+  return textBlock?.text ?? "{}";
+}
+
+function tryParseJson(text: string): { ok: true; value: any } | { ok: false; candidate: string; err: unknown } {
   const match = text.match(/\{[\s\S]*\}/);
   const candidate = match ? match[0] : text;
-
-  // Try the raw candidate first (the common case, no repair needed). If that
-  // throws, retry once against a repaired version that escapes stray literal
-  // quotes inside string values. If even that fails, surface a clear error
-  // with a snippet of the offending text instead of a bare "Unexpected token"
-  // with no context, so a real parse failure is at least diagnosable.
   try {
-    return JSON.parse(candidate);
+    return { ok: true, value: JSON.parse(candidate) };
   } catch {
     try {
-      return JSON.parse(repairStrayQuotes(candidate));
+      return { ok: true, value: JSON.parse(repairStrayQuotes(candidate)) };
     } catch (err) {
-      throw new Error(
-        `Couldn't parse the model's JSON response (${String(err)}). Raw response started with: ${candidate.slice(0, 300)}`
-      );
+      return { ok: false, candidate, err };
     }
   }
 }
 
+// Low-level call: takes a full messages array (for multi-turn conversations) plus
+// an optional system prompt, and returns the parsed JSON the model was asked to
+// respond with.
+//
+// A long entry (e.g. a whole gala-weekend recap logged in one go) can make the
+// model's JSON response longer than max_tokens, so the response gets cut off
+// mid-string and JSON.parse throws "Unterminated string in JSON" -- a real crash,
+// not something the quote-repair above can fix, since the JSON is genuinely
+// incomplete rather than malformed. So on top of the quote-repair, if parsing
+// still fails after that, this retries ONCE with an explicit instruction to
+// return complete, valid JSON only. Only if that second attempt also fails does
+// it throw -- and the thrown error is what the API route surfaces to the UI, so
+// callers should catch it and show something friendly rather than crash.
+async function callClaudeMessages(
+  messages: { role: "user" | "assistant"; content: any }[],
+  maxTokens = 800,
+  system?: string
+) {
+  const firstText = await callOnce(messages, maxTokens, system);
+  const firstAttempt = tryParseJson(firstText);
+  if (firstAttempt.ok) return firstAttempt.value;
+
+  try {
+    const retryMessages = [
+      ...messages,
+      { role: "assistant" as const, content: firstText },
+      {
+        role: "user" as const,
+        content:
+          "That wasn't valid, complete JSON -- it looks like it may have been cut off. Return ONLY complete, valid JSON, nothing else. No partial output, no explanation, no text outside the JSON object.",
+      },
+    ];
+    const retryText = await callOnce(retryMessages, maxTokens, system);
+    const retryAttempt = tryParseJson(retryText);
+    if (retryAttempt.ok) return retryAttempt.value;
+    throw new Error(
+      `Couldn't parse the model's JSON response (${String(retryAttempt.err)}). Raw response started with: ${retryAttempt.candidate.slice(0, 300)}`
+    );
+  } catch (err: any) {
+    if (err instanceof Error && err.message.startsWith("Couldn't parse")) throw err;
+    // The retry call itself failed (network/API error) rather than producing
+    // bad JSON -- surface the original parse failure, which is still the
+    // most useful information available.
+    throw new Error(
+      `Couldn't parse the model's JSON response (${String(firstAttempt.err)}). Raw response started with: ${firstAttempt.candidate.slice(0, 300)}`
+    );
+  }
+}
+
 // Single-user-turn convenience wrapper used by all the single-shot estimators below.
-async function callClaude(content: any[]) {
-  return callClaudeMessages([{ role: "user", content }]);
+async function callClaude(content: any[], maxTokens = 800) {
+  return callClaudeMessages([{ role: "user", content }], maxTokens);
 }
 
 // Normalizes whatever content-type the browser reports into one of the types
@@ -258,6 +303,15 @@ Respond with ONLY JSON, no other text, in exactly one of these two shapes:
 // cycle note, and extract the relevant fields for whichever it is. Duration for
 // workouts is parsed straight out of the text (e.g. "yoga sixty minutes") rather
 // than a separate field.
+//
+// max_tokens is 2048 here (well above the other estimators' default 800) because
+// this is the one call that has to handle a long, multi-part entry typed all at
+// once (a whole weekend recap, several drinks and apps and meals in one go) --
+// at 800 that JSON response was getting cut off mid-string on exactly that kind
+// of entry and crashing the parse. The prompt also now explicitly caps
+// `description` to a short summary rather than a verbatim echo of everything
+// typed, which keeps the response shorter and avoids duplicating what the person
+// just typed back at them.
 export async function estimateLogEntry({
   text,
   imageBase64,
@@ -287,7 +341,9 @@ ${text ? `The person said: "${text}".` : ""} ${
 
 Decide which of the four types it is, then extract fields for that type only -- leave every field for the other types null.
 
-For FOOD: always give a single best-guess calorie/macro estimate, like an experienced dietitian eyeballing a plate or a casual description. Never return null for calories/protein/carbs/fat once you've decided the entry is food -- always pick a concrete number, even a rough one, no matter how vague or rambling the description is. Only count food already eaten; ignore anything the person says they're about to eat or plan to eat later -- do not let a mention of future food push you toward returning null, just estimate the part that was actually eaten. Example: "I just ate a fun size Twix and I'm probably gonna go to sushi later" -> this is a food entry for the Twix ONLY (roughly 80 calories, 1g protein, 10g carbs, 4g fat) -- the sushi is not eaten yet, so it's ignored entirely, but you still must output real numbers, not null. If the text truly contains no food that was eaten, it is not a food entry -- reconsider whether it's actually a weigh-in, workout, or period note instead. Also estimate nutrition_detail (fiber_g, sugar_g, sodium_mg, saturated_fat_g, cholesterol_mg, potassium_mg) the way a nutrition label would show it -- give your best rough estimate rather than defaulting to null.
+IMPORTANT -- keep "description" short: it must be a brief summary (roughly 100 characters or fewer), never a verbatim transcript of everything the person typed. This matters most on long, rambling, or multi-part entries (e.g. a whole weekend recap) -- summarize the gist ("Gala weekend: apps, wine, champagne") rather than repeating it back word for word. A short description also keeps your JSON response itself shorter, which matters for long entries.
+
+For FOOD: always give a single best-guess calorie/macro estimate, like an experienced dietitian eyeballing a plate or a casual description. Never return null for calories/protein/carbs/fat once you've decided the entry is food -- always pick a concrete number, even a rough one, no matter how vague, long, or rambling the description is. If the entry covers multiple foods/drinks across one sitting or one day (e.g. several appetizers plus multiple glasses of wine at a gala), add up a single combined total for calories/protein/carbs/fat rather than trying to itemize -- one row, one honest total. Only count food already eaten; ignore anything the person says they're about to eat or plan to eat later -- do not let a mention of future food push you toward returning null, just estimate the part that was actually eaten. Example: "I just ate a fun size Twix and I'm probably gonna go to sushi later" -> this is a food entry for the Twix ONLY (roughly 80 calories, 1g protein, 10g carbs, 4g fat) -- the sushi is not eaten yet, so it's ignored entirely, but you still must output real numbers, not null. If the text truly contains no food that was eaten, it is not a food entry -- reconsider whether it's actually a weigh-in, workout, or period note instead. Also estimate nutrition_detail (fiber_g, sugar_g, sodium_mg, saturated_fat_g, cholesterol_mg, potassium_mg) the way a nutrition label would show it -- give your best rough estimate rather than defaulting to null.
 
 For WORKOUT: parse the duration in minutes directly out of what was said if a time is mentioned (e.g. "sixty minutes" -> 60); if no duration was mentioned, use null.
 
@@ -298,7 +354,7 @@ For PERIOD: extract flow (e.g. "light", "medium", "heavy") if mentioned, else nu
 Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weight" | "period", "description": string, "calories": number | null, "protein_g": number | null, "carbs_g": number | null, "fat_g": number | null, "nutrition_detail": {"fiber_g": number | null, "sugar_g": number | null, "sodium_mg": number | null, "saturated_fat_g": number | null, "cholesterol_mg": number | null, "potassium_mg": number | null} | null, "workout_type": string | null, "duration_min": number | null, "weight_lbs": number | null, "flow": string | null, "period_notes": string | null}`,
   });
 
-  const result = await callClaude(content);
+  const result = await callClaude(content, 2048);
 
   // The route that consumes this only special-cases "workout", "weight", and
   // "period" -- anything else lands in the food table. So the guarantee below
@@ -380,4 +436,25 @@ async function ensureFoodNumbers(
   result.protein_g = result.protein_g ?? 5;
   result.carbs_g = result.carbs_g ?? 22;
   result.fat_g = result.fat_g ?? 8;
+}
+
+// The "Ask" coach -- a free-form nutrition/fitness Q&A that NEVER logs
+// anything. This is deliberately its own function (plain text out, not JSON)
+// so a question like "brown rice or white rice?" gets answered conversationally
+// instead of being forced through the log-entry classifier and recorded as food.
+export async function coachAnswer({
+  messages,
+  context,
+}: {
+  messages: { role: "user" | "assistant"; content: string }[];
+  context?: string;
+}): Promise<string> {
+  const system = `You are a warm, practical nutrition and fitness coach living inside Courtney's personal health app. She is tracking her weight, body fat %, skeletal muscle mass, workouts, and daily calories, working toward gradual fat loss while keeping and building muscle.
+
+Answer her questions directly and conversationally, like a knowledgeable friend texting back -- usually 2 to 5 sentences unless she asks for more. Always give a clear recommendation instead of hedging (e.g. if she asks "brown rice or white rice?", pick one and say why). Be encouraging, never preachy. This is general wellness guidance, not medical advice. Never output JSON, never say you logged anything -- you are only here to talk.${
+    context ? `\n\nContext about her day (use only if relevant, don't recite it): ${context}` : ""
+  }`;
+
+  const text = await callOnce(messages, 700, system);
+  return text || "Sorry, I didn't catch that -- try again.";
 }

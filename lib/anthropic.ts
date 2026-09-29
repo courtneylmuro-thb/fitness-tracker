@@ -174,6 +174,14 @@ function normalizeMediaType(mediaType?: string): string {
   return "image/jpeg";
 }
 
+// Given a YYYY-MM-DD date string, returns its day-of-week name (e.g. "Monday").
+// Parsed as UTC noon rather than midnight local time so this never shifts to
+// the adjacent calendar day depending on the server's timezone.
+function dayNameForDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  return d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+}
+
 export async function estimateFood({
   description,
   imageBase64,
@@ -311,6 +319,14 @@ Respond with ONLY JSON, no other text, in exactly one of these two shapes:
 // workouts is parsed straight out of the text (e.g. "yoga sixty minutes") rather
 // than a separate field.
 //
+// `referenceDate` is the calendar date (YYYY-MM-DD) the entry is being logged
+// against by default -- normally "today" in Courtney's own timezone, passed in
+// by the route from the same value it already uses as its own fallback. It's
+// given to the model as context so it can correctly resolve a day-of-week or
+// relative-date mention in the text (e.g. "Sunday: avocado, watermelon..." said
+// on a Monday) into an actual calendar date, via the mentioned_date field below,
+// instead of everything silently landing on today regardless of what was said.
+//
 // max_tokens is 2048 here (well above the other estimators' default 800) because
 // this is the one call that has to handle a long, multi-part entry typed all at
 // once (a whole weekend recap, several drinks and apps and meals in one go) --
@@ -323,10 +339,12 @@ export async function estimateLogEntry({
   text,
   imageBase64,
   mediaType,
+  referenceDate,
 }: {
   text?: string;
   imageBase64?: string;
   mediaType?: string;
+  referenceDate?: string;
 }) {
   const content: any[] = [];
   if (imageBase64) {
@@ -335,6 +353,12 @@ export async function estimateLogEntry({
       source: { type: "base64", media_type: normalizeMediaType(mediaType), data: imageBase64 },
     });
   }
+
+  const today = referenceDate && /^\d{4}-\d{2}-\d{2}$/.test(referenceDate)
+    ? referenceDate
+    : new Date().toISOString().slice(0, 10);
+  const todayDayName = dayNameForDate(today);
+
   content.push({
     type: "text",
     text: `You are logging a single entry into a personal fitness/nutrition tracker. The input is one of four things:
@@ -345,6 +369,8 @@ export async function estimateLogEntry({
 ${text ? `The person said: "${text}".` : ""} ${
       imageBase64 ? "A photo is attached -- if it's a photo of food, treat this as a food entry." : ""
     }
+
+For reference, today is ${today} (a ${todayDayName}). This entry is being logged right now, but the person may be describing something from an earlier day -- e.g. they say "Sunday: avocado, watermelon..." while actually talking to you on a Monday, or "yesterday I had..." or "two days ago I did...". If the text names a specific day of the week or a relative day (yesterday, last night, two days ago, etc.), figure out the actual calendar date being referred to -- relative to today -- and put it in "mentioned_date" as YYYY-MM-DD. A bare day-of-week name (e.g. "Sunday") always means the most recent occurrence of that day at or before today, never a future date. If the entry doesn't reference any specific day or relative date at all (it's just describing something happening now), set "mentioned_date" to null -- don't guess a date that wasn't actually implied.
 
 Decide which of the four types it is, then extract fields for that type only -- leave every field for the other types null.
 
@@ -358,10 +384,22 @@ For WEIGH-IN: extract the number as weight_lbs. Assume pounds unless a unit like
 
 For PERIOD: extract flow (e.g. "light", "medium", "heavy") if mentioned, else null, and put the raw note in period_notes.
 
-Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weight" | "period", "description": string, "calories": number | null, "protein_g": number | null, "carbs_g": number | null, "fat_g": number | null, "nutrition_detail": {"fiber_g": number | null, "sugar_g": number | null, "sodium_mg": number | null, "saturated_fat_g": number | null, "cholesterol_mg": number | null, "potassium_mg": number | null} | null, "workout_type": string | null, "duration_min": number | null, "weight_lbs": number | null, "flow": string | null, "period_notes": string | null}`,
+Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weight" | "period", "description": string, "mentioned_date": string | null, "calories": number | null, "protein_g": number | null, "carbs_g": number | null, "fat_g": number | null, "nutrition_detail": {"fiber_g": number | null, "sugar_g": number | null, "sodium_mg": number | null, "saturated_fat_g": number | null, "cholesterol_mg": number | null, "potassium_mg": number | null} | null, "workout_type": string | null, "duration_min": number | null, "weight_lbs": number | null, "flow": string | null, "period_notes": string | null}`,
   });
 
   const result = await callClaude(content, 2048);
+
+  // Defensive: only trust mentioned_date if it's actually a well-formed
+  // YYYY-MM-DD string and not in the future -- a malformed or future value
+  // from the model should just be treated as "no date mentioned" rather than
+  // silently corrupting where the entry gets logged.
+  if (
+    typeof result.mentioned_date !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(result.mentioned_date) ||
+    result.mentioned_date > today
+  ) {
+    result.mentioned_date = null;
+  }
 
   // The route that consumes this only special-cases "workout", "weight", and
   // "period" -- anything else lands in the food table. So the guarantee below

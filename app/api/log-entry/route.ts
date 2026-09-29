@@ -29,9 +29,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Say it, type it, or snap a photo" }, { status: 400 });
     }
 
-    const entry = await estimateLogEntry({ text, imageBase64, mediaType });
+    // `referenceDate` is what the classifier treats as "today" for resolving
+    // any day-of-week or relative-date mention in the text (e.g. "Sunday: ...",
+    // "yesterday I had..."). Same fallback as entryDate below, so the two stay
+    // in sync.
+    const referenceDate = date || new Date().toISOString().slice(0, 10);
+    const entry = await estimateLogEntry({ text, imageBase64, mediaType, referenceDate });
     const supabase = getSupabaseAdmin();
-    const entryDate = date || new Date().toISOString().slice(0, 10);
+
+    // If the entry text itself named a specific day (e.g. logged today but
+    // talking about Sunday), that's a stronger signal of intent than the
+    // ambient default-to-today date, so it wins. Falls back to the explicit
+    // `date` param (from the UI's date picker) and then today, same as before.
+    const mentionedDate: string | null =
+      typeof entry.mentioned_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(entry.mentioned_date)
+        ? entry.mentioned_date
+        : null;
+    const explicitDate: string | null = mentionedDate || date || null;
+    const entryDate = explicitDate || referenceDate;
 
     if (entry.type === "workout") {
       const { data, error } = await supabase
@@ -86,7 +101,11 @@ export async function POST(req: NextRequest) {
       nutrition_detail: entry.nutrition_detail ?? null,
       source: imageBase64 ? "photo" : "text",
     };
-    if (date) insertRow.logged_at = `${date}T12:00:00`;
+    // Only override the default "now" timestamp when we actually have an
+    // explicit date to use -- either the UI's date picker or a day the text
+    // itself named (e.g. "Sunday: ..."). If neither is present, leave
+    // logged_at unset so it keeps its real time-of-day via Supabase's default.
+    if (explicitDate) insertRow.logged_at = `${explicitDate}T12:00:00`;
 
     const { data, error } = await supabase.from("food_logs").insert(insertRow).select().single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

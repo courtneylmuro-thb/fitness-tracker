@@ -479,11 +479,11 @@ export default function LogPage() {
           ref={fileInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           style={{ display: "none" }}
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) submitPhoto(file);
+            e.target.value = "";
           }}
         />
         <button className="btn" disabled={loading || !text.trim()} onClick={submitText}>

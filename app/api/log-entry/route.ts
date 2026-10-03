@@ -78,6 +78,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ type: "weight", ...data });
     }
 
+    if (entry.type === "treatment") {
+      const { data, error } = await supabase
+        .from("treatments")
+        .insert({
+          name: entry.treatment_name || entry.description || "Treatment",
+          detail: entry.treatment_detail ?? entry.description ?? null,
+          date: entryDate,
+          source: "manual",
+        })
+        .select()
+        .single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ type: "treatment", ...data });
+    }
+
     if (entry.type === "period") {
       const { data, error } = await supabase
         .from("cycle_logs")

@@ -361,11 +361,12 @@ export async function estimateLogEntry({
 
   content.push({
     type: "text",
-    text: `You are logging a single entry into a personal fitness/nutrition tracker. The input is one of four things:
+    text: `You are logging a single entry into a personal fitness/nutrition tracker. The input is one of five things:
 - a MEAL/FOOD (e.g. "two eggs and toast", or a photo of food)
 - a WORKOUT (e.g. "yoga sixty minutes", "ran 3 miles", "15 min of squats and situps")
 - a WEIGH-IN (e.g. "I weighed in at 117 lbs", "117 today", "weight is 116.5", "down to 115")
 - a PERIOD/CYCLE note (e.g. "started my period", "period day 2, light flow", "cramps today")
+- a TREATMENT / MEDICAL or WELLNESS treatment (e.g. "NAD+ IV", "IV drip with glutathione", "B12 shot", "vitamin infusion", "hydration IV", "peptide injection") -- things that are NOT food, NOT a workout: IV drips, infusions, injections/shots, NAD+, vitamin/mineral IVs, peptides, and similar medical or wellness treatments. These must NOT be counted as food/calories.
 ${text ? `The person said: "${text}".` : ""} ${
       imageBase64 ? "A photo is attached -- if it's a photo of food, treat this as a food entry." : ""
     }
@@ -384,7 +385,9 @@ For WEIGH-IN: extract the number as weight_lbs. Assume pounds unless a unit like
 
 For PERIOD: extract flow (e.g. "light", "medium", "heavy") if mentioned, else null, and put the raw note in period_notes.
 
-Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weight" | "period", "description": string, "mentioned_date": string | null, "calories": number | null, "protein_g": number | null, "carbs_g": number | null, "fat_g": number | null, "nutrition_detail": {"fiber_g": number | null, "sugar_g": number | null, "sodium_mg": number | null, "saturated_fat_g": number | null, "cholesterol_mg": number | null, "potassium_mg": number | null} | null, "workout_type": string | null, "duration_min": number | null, "weight_lbs": number | null, "flow": string | null, "period_notes": string | null}`,
+For TREATMENT: this is an IV drip, infusion, injection/shot, NAD+, vitamin/mineral IV, peptide, or similar medical/wellness treatment -- never food or exercise. Put a short label in treatment_name (e.g. "NAD+ IV", "B12 shot", "Glutathione IV") and the specifics/dosages in treatment_detail (e.g. "Invincibility 250mg NAD+, Max Detox 2000mg Glutathione"). Do NOT fill in any food/calorie fields for a treatment.
+
+Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weight" | "period" | "treatment", "description": string, "mentioned_date": string | null, "calories": number | null, "protein_g": number | null, "carbs_g": number | null, "fat_g": number | null, "nutrition_detail": {"fiber_g": number | null, "sugar_g": number | null, "sodium_mg": number | null, "saturated_fat_g": number | null, "cholesterol_mg": number | null, "potassium_mg": number | null} | null, "workout_type": string | null, "duration_min": number | null, "weight_lbs": number | null, "flow": string | null, "period_notes": string | null, "treatment_name": string | null, "treatment_detail": string | null}`,
   });
 
   const result = await callClaude(content, 2048);
@@ -411,7 +414,12 @@ Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weigh
   // untouched. Normalizing to "food" here keeps this function's output and
   // the route's insert logic in sync no matter what the classifier actually
   // returned.
-  if (result.type !== "workout" && result.type !== "weight" && result.type !== "period") {
+  if (
+    result.type !== "workout" &&
+    result.type !== "weight" &&
+    result.type !== "period" &&
+    result.type !== "treatment"
+  ) {
     result.type = "food";
     await ensureFoodNumbers(result, { imageBase64, mediaType }, text);
   }

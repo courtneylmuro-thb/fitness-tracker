@@ -7,7 +7,7 @@ const TEAL = "#3c6364";
 
 type LogResult = {
   id?: string;
-  type: "food" | "workout" | "weight" | "period";
+  type: "food" | "workout" | "weight" | "period" | "treatment";
   description?: string;
   estimated_calories?: number;
   protein_g?: number;
@@ -18,6 +18,8 @@ type LogResult = {
   weight_lbs?: number | null;
   flow?: string | null;
   notes?: string | null;
+  name?: string | null;
+  detail?: string | null;
 };
 
 type SavedFood = {
@@ -420,13 +422,13 @@ export default function LogPage() {
         </Link>
       </div>
       <div className="subtle" style={{ marginBottom: 16 }}>
-        Food, workout, weigh-in, or period note -- say it, type it, or snap a photo, doesn't need to be precise.
+        Food, workout, weigh-in, period, or treatment (like an IV) -- say it, type it, or snap a photo, doesn't need to be precise.
       </div>
 
       <div className="card">
         <textarea
           rows={3}
-          placeholder='e.g. "two eggs and toast", "yoga sixty minutes", "weighed in at 117", or "started my period"'
+          placeholder='e.g. "two eggs and toast", "yoga sixty minutes", "weighed in at 117", "NAD+ IV drip", or "started my period"'
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
@@ -605,6 +607,14 @@ export default function LogPage() {
           <h2>Logged period note</h2>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>{result.flow ? `Flow: ${result.flow}` : "Noted"}</div>
           {result.notes && <div className="subtle">{result.notes}</div>}
+        </div>
+      )}
+
+      {result && result.type === "treatment" && (
+        <div className="card">
+          <h2>Logged treatment</h2>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>{result.name || result.description}</div>
+          {result.detail && <div className="subtle">{result.detail}</div>}
         </div>
       )}
     </div>

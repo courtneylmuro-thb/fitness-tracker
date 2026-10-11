@@ -377,7 +377,7 @@ Decide which of the four types it is, then extract fields for that type only -- 
 
 IMPORTANT -- keep "description" short: it must be a brief summary (roughly 100 characters or fewer), never a verbatim transcript of everything the person typed. This matters most on long, rambling, or multi-part entries (e.g. a whole weekend recap) -- summarize the gist ("Gala weekend: apps, wine, champagne") rather than repeating it back word for word. A short description also keeps your JSON response itself shorter, which matters for long entries.
 
-For FOOD: always give a single best-guess calorie/macro estimate, like an experienced dietitian eyeballing a plate or a casual description. Never return null for calories/protein/carbs/fat once you've decided the entry is food -- always pick a concrete number, even a rough one, no matter how vague, long, or rambling the description is. If the entry covers multiple foods/drinks across one sitting or one day (e.g. several appetizers plus multiple glasses of wine at a gala), add up a single combined total for calories/protein/carbs/fat rather than trying to itemize -- one row, one honest total. Only count food already eaten; ignore anything the person says they're about to eat or plan to eat later -- do not let a mention of future food push you toward returning null, just estimate the part that was actually eaten. Example: "I just ate a fun size Twix and I'm probably gonna go to sushi later" -> this is a food entry for the Twix ONLY (roughly 80 calories, 1g protein, 10g carbs, 4g fat) -- the sushi is not eaten yet, so it's ignored entirely, but you still must output real numbers, not null. If the text truly contains no food that was eaten, it is not a food entry -- reconsider whether it's actually a weigh-in, workout, or period note instead. Also estimate nutrition_detail (fiber_g, sugar_g, sodium_mg, saturated_fat_g, cholesterol_mg, potassium_mg) the way a nutrition label would show it -- give your best rough estimate rather than defaulting to null.
+For FOOD: break the entry into SEPARATE ITEMS -- one object per distinct food or drink -- in the `food_items` array. Each item has its own short `description` (e.g. "quarter of a pizza", "turkey sandwich", "glass of white wine") and its own best-guess `calories`, `protein_g`, `carbs_g`, `fat_g`, and `nutrition_detail` (fiber_g, sugar_g, sodium_mg, saturated_fat_g, cholesterol_mg, potassium_mg). ALWAYS give concrete numbers for every item, never null, like an experienced dietitian eyeballing each thing. Examples: "a quarter of the pizza and a bite of the rest" -> TWO items: {"quarter of a pizza", ~95 cal} and {"a bite of pizza", ~30 cal}. "turkey sandwich and a latte" -> two items. A single food is just one item in the array. Only count food ALREADY eaten; ignore anything she says she is about to eat or plans to eat later -- e.g. "I just ate a fun size Twix and I'm probably gonna go to sushi later" -> one item for the Twix only (~80 cal, 1g protein, 10g carbs, 4g fat), the sushi ignored entirely. If the text contains no food that was actually eaten, it is NOT a food entry -- reconsider whether it's a weigh-in, workout, period, or treatment. Put a brief overall summary in the top-level `description` and leave the top-level calories/protein/carbs/fat/nutrition_detail null -- the per-item numbers in food_items are what matter.
 
 For WORKOUT: parse the duration in minutes directly out of what was said if a time is mentioned (e.g. "sixty minutes" -> 60); if no duration was mentioned, use null.
 
@@ -387,7 +387,7 @@ For PERIOD: extract flow (e.g. "light", "medium", "heavy") if mentioned, else nu
 
 For TREATMENT: this is an IV drip, infusion, injection/shot, NAD+, vitamin/mineral IV, peptide, or similar medical/wellness treatment -- never food or exercise. Put a short label in treatment_name (e.g. "NAD+ IV", "B12 shot", "Glutathione IV") and the specifics/dosages in treatment_detail (e.g. "Invincibility 250mg NAD+, Max Detox 2000mg Glutathione"). Do NOT fill in any food/calorie fields for a treatment.
 
-Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weight" | "period" | "treatment", "description": string, "mentioned_date": string | null, "calories": number | null, "protein_g": number | null, "carbs_g": number | null, "fat_g": number | null, "nutrition_detail": {"fiber_g": number | null, "sugar_g": number | null, "sodium_mg": number | null, "saturated_fat_g": number | null, "cholesterol_mg": number | null, "potassium_mg": number | null} | null, "workout_type": string | null, "duration_min": number | null, "weight_lbs": number | null, "flow": string | null, "period_notes": string | null, "treatment_name": string | null, "treatment_detail": string | null}`,
+Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weight" | "period" | "treatment", "description": string, "mentioned_date": string | null, "calories": number | null, "protein_g": number | null, "carbs_g": number | null, "fat_g": number | null, "nutrition_detail": {"fiber_g": number | null, "sugar_g": number | null, "sodium_mg": number | null, "saturated_fat_g": number | null, "cholesterol_mg": number | null, "potassium_mg": number | null} | null, "workout_type": string | null, "duration_min": number | null, "weight_lbs": number | null, "flow": string | null, "period_notes": string | null, "treatment_name": string | null, "treatment_detail": string | null, "food_items": [{"description": string, "calories": number, "protein_g": number, "carbs_g": number, "fat_g": number, "nutrition_detail": {"fiber_g": number | null, "sugar_g": number | null, "sodium_mg": number | null, "saturated_fat_g": number | null, "cholesterol_mg": number | null, "potassium_mg": number | null} | null}] | null}`,
   });
 
   const result = await callClaude(content, 2048);
@@ -421,7 +421,29 @@ Respond with ONLY this JSON, no other text: {"type": "food" | "workout" | "weigh
     result.type !== "treatment"
   ) {
     result.type = "food";
-    await ensureFoodNumbers(result, { imageBase64, mediaType }, text);
+    if (Array.isArray(result.food_items) && result.food_items.length > 0) {
+      // Guarantee every separated item has concrete numbers (never null).
+      for (const it of result.food_items) {
+        if (it.calories === null || it.calories === undefined) it.calories = 200;
+        if (it.protein_g == null) it.protein_g = 0;
+        if (it.carbs_g == null) it.carbs_g = 0;
+        if (it.fat_g == null) it.fat_g = 0;
+      }
+    } else {
+      // Model didn't itemize -> use the single-row guarantee, then wrap it as
+      // one item so downstream code always has a populated food_items array.
+      await ensureFoodNumbers(result, { imageBase64, mediaType }, text);
+      result.food_items = [
+        {
+          description: result.description || text || "Food entry",
+          calories: result.calories,
+          protein_g: result.protein_g,
+          carbs_g: result.carbs_g,
+          fat_g: result.fat_g,
+          nutrition_detail: result.nutrition_detail ?? null,
+        },
+      ];
+    }
   }
 
   return result;

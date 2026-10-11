@@ -20,6 +20,14 @@ type LogResult = {
   notes?: string | null;
   name?: string | null;
   detail?: string | null;
+  items?: Array<{
+    id?: string;
+    description?: string;
+    estimated_calories?: number | null;
+    protein_g?: number | null;
+    carbs_g?: number | null;
+    fat_g?: number | null;
+  }>;
 };
 
 type SavedFood = {
@@ -365,11 +373,11 @@ export default function LogPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: saveName.trim(),
-          description: result.description,
-          calories: result.estimated_calories,
-          protein_g: result.protein_g,
-          carbs_g: result.carbs_g,
-          fat_g: result.fat_g,
+          description: result.items?.[0]?.description ?? result.description,
+          calories: result.items?.[0]?.estimated_calories ?? result.estimated_calories,
+          protein_g: result.items?.[0]?.protein_g ?? result.protein_g,
+          carbs_g: result.items?.[0]?.carbs_g ?? result.carbs_g,
+          fat_g: result.items?.[0]?.fat_g ?? result.fat_g,
         }),
       });
       if (!res.ok) {
@@ -545,13 +553,32 @@ export default function LogPage() {
       {result && result.type === "food" && (
         <div className="card">
           <h2>Logged food</h2>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>{result.description}</div>
-          <div className="subtle">
-            {Math.round(result.estimated_calories ?? 0)} cal · {Math.round(result.protein_g ?? 0)}g protein ·{" "}
-            {Math.round(result.carbs_g ?? 0)}g carbs · {Math.round(result.fat_g ?? 0)}g fat
-          </div>
+          {Array.isArray(result.items) && result.items.length > 0 ? (
+            <>
+              {result.items.map((it, i) => (
+                <div key={it.id || i} className="food-entry">
+                  <span>{it.description}</span>
+                  <span className="subtle" style={{ whiteSpace: "nowrap" }}>
+                    {Math.round(it.estimated_calories ?? 0)} cal
+                  </span>
+                </div>
+              ))}
+              <div className="subtle" style={{ marginTop: 8 }}>
+                {result.items.length} item{result.items.length > 1 ? "s" : ""} ·{" "}
+                {Math.round(result.items.reduce((s, it) => s + (it.estimated_calories ?? 0), 0))} cal total
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>{result.description}</div>
+              <div className="subtle">
+                {Math.round(result.estimated_calories ?? 0)} cal · {Math.round(result.protein_g ?? 0)}g protein ·{" "}
+                {Math.round(result.carbs_g ?? 0)}g carbs · {Math.round(result.fat_g ?? 0)}g fat
+              </div>
+            </>
+          )}
 
-          {saveNote ? (
+          {(!result.items || result.items.length === 1) && (saveNote ? (
             <div className="subtle" style={{ marginTop: 12, color: "#248a3d" }}>
               {saveNote}
             </div>
@@ -559,7 +586,7 @@ export default function LogPage() {
             <button
               className="btn btn-secondary"
               style={{ marginTop: 12 }}
-              onClick={() => setSaveName(result.description || "")}
+              onClick={() => setSaveName(result.items?.[0]?.description || result.description || "")}
             >
               ⭐ Save as my food
             </button>
@@ -580,7 +607,7 @@ export default function LogPage() {
                 </button>
               </div>
             </div>
-          )}
+          ))}
         </div>
       )}
 

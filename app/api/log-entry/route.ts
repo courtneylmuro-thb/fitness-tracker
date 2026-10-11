@@ -107,24 +107,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ type: "period", ...data });
     }
 
-    const insertRow: Record<string, any> = {
-      description: entry.description || text || "Food entry",
-      estimated_calories: entry.calories ?? null,
-      protein_g: entry.protein_g ?? null,
-      carbs_g: entry.carbs_g ?? null,
-      fat_g: entry.fat_g ?? null,
-      nutrition_detail: entry.nutrition_detail ?? null,
-      source: imageBase64 ? "photo" : "text",
-    };
-    // Only override the default "now" timestamp when we actually have an
-    // explicit date to use -- either the UI's date picker or a day the text
-    // itself named (e.g. "Sunday: ..."). If neither is present, leave
-    // logged_at unset so it keeps its real time-of-day via Supabase's default.
-    if (explicitDate) insertRow.logged_at = `${explicitDate}T12:00:00`;
+    // FOOD (default): insert one row PER ITEM so each food/drink can be edited
+    // or deleted on its own, instead of one combined lump.
+    const items =
+      Array.isArray(entry.food_items) && entry.food_items.length > 0
+        ? entry.food_items
+        : [
+            {
+              description: entry.description || text || "Food entry",
+              calories: entry.calories,
+              protein_g: entry.protein_g,
+              carbs_g: entry.carbs_g,
+              fat_g: entry.fat_g,
+              nutrition_detail: entry.nutrition_detail,
+            },
+          ];
 
-    const { data, error } = await supabase.from("food_logs").insert(insertRow).select().single();
+    const rows = items.map((it: any) => {
+      const row: Record<string, any> = {
+        description: it.description || entry.description || text || "Food entry",
+        estimated_calories: it.calories ?? null,
+        protein_g: it.protein_g ?? null,
+        carbs_g: it.carbs_g ?? null,
+        fat_g: it.fat_g ?? null,
+        nutrition_detail: it.nutrition_detail ?? null,
+        source: imageBase64 ? "photo" : "text",
+      };
+      // Only override the default "now" timestamp when we have an explicit date
+      // (UI date picker, or a day the text itself named).
+      if (explicitDate) row.logged_at = `${explicitDate}T12:00:00`;
+      return row;
+    });
+
+    const { data, error } = await supabase.from("food_logs").insert(rows).select();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ type: "food", ...data });
+    return NextResponse.json({ type: "food", items: data });
   } catch (err: any) {
     return NextResponse.json({ error: err.message ?? "Unknown error" }, { status: 500 });
   }

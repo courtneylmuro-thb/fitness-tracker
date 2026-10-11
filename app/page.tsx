@@ -70,6 +70,22 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+function workoutEmoji(type: string): string {
+  const t = (type || "").toLowerCase();
+  if (/yoga|vinyasa|vinasa|flow|sculpt/.test(t)) return "🧘";
+  if (/skate/.test(t)) return "🛼";
+  if (/pilates|reformer|barre/.test(t)) return "🤸";
+  if (/run|jog|5k|c25k/.test(t)) return "🏃";
+  if (/walk|hike/.test(t)) return "🚶";
+  if (/spin|cycl|bike|peloton/.test(t)) return "🚴";
+  if (/swim/.test(t)) return "🏊";
+  if (/box|kick/.test(t)) return "🥊";
+  if (/dance|zumba/.test(t)) return "💃";
+  if (/hiit|bootcamp|conditioning|crossfit|burn/.test(t)) return "🔥";
+  if (/strong|lift|weight|strength|dead|squat|press|six pack|back|leg|glute|abs|core|calisthen|functional/.test(t)) return "🏋️";
+  return "💪";
+}
+
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
@@ -642,7 +658,7 @@ export default function Dashboard() {
         {data?.workouts.slice(0, 8).map((w) => (
           <div key={w.id} className="food-entry">
             <span>
-              {w.workout_type} <span className="subtle">· {w.date.slice(5)}</span>
+              {workoutEmoji(w.workout_type)} {w.workout_type} <span className="subtle">· {w.date.slice(5)}</span>
             </span>
             <span style={{ textAlign: "right" }}>
               <span className={`pill ${w.source === "calendar" ? "pill-blue" : "pill-green"}`}>

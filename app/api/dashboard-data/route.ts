@@ -11,6 +11,13 @@ export const revalidate = 0;
 // Courtney's actual day is over.
 const TIMEZONE = "America/Los_Angeles";
 
+// Courtney's baseline resting-calorie burn (BMR), derived from the average of
+// her own Apple Health resting_calories on fully-synced days (~1,180-1,250 in
+// Oct 2026). Used as a floor whenever Apple Health hasn't reported a resting
+// value for a day, so a day never shows zero calories burned. Refine if her
+// weight changes meaningfully.
+const BASELINE_BMR = 1214;
+
 function pacificDateString(d: Date): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: TIMEZONE,
@@ -55,7 +62,16 @@ export async function GET(req: NextRequest) {
   const proteinToday = foodToday.reduce((sum, f) => sum + (Number(f.protein_g) || 0), 0);
   const carbsToday = foodToday.reduce((sum, f) => sum + (Number(f.carbs_g) || 0), 0);
   const fatToday = foodToday.reduce((sum, f) => sum + (Number(f.fat_g) || 0), 0);
-  const metrics = metricsRes.data || [];
+  // Fill any day missing a total_calories_burned (Apple Health didn't sync that
+  // day) with baseline BMR + whatever active calories exist, so the Calories
+  // Burned chart never shows a false zero bar.
+  const metrics = (metricsRes.data || []).map((m: any) => ({
+    ...m,
+    total_calories_burned:
+      m.total_calories_burned != null
+        ? m.total_calories_burned
+        : Number(m.resting_calories ?? BASELINE_BMR) + (Number(m.active_calories) || 0),
+  }));
   const todayMetrics = metrics.find((m) => m.date === today);
 
   // The health sync only fills in resting_calories (BMR) via an overnight batch
@@ -71,19 +87,23 @@ export async function GET(req: NextRequest) {
   let activeResolved: number = Number(todayMetrics?.active_calories) || 0;
   let burnedIsEstimate = false;
 
-  if (today === pacificToday && todayMetrics && (todayMetrics.resting_calories === null || todayMetrics.resting_calories === undefined)) {
+  if (restingResolved === null || restingResolved === undefined) {
+    // No resting/BMR from Apple Health for this day yet (its batch runs the next
+    // morning, and some days never sync). Use the average of the last 7 days
+    // that DO have a real value; if there are none, fall back to the baseline
+    // BMR -- so a day never shows zero calories burned. Flagged as an estimate.
     const recentResting = metrics
       .filter((m) => m.date !== today && m.resting_calories !== null && m.resting_calories !== undefined)
       .slice(-7)
       .map((m) => Number(m.resting_calories));
-
-    if (recentResting.length > 0) {
-      restingResolved = recentResting.reduce((s, v) => s + v, 0) / recentResting.length;
-      burnedIsEstimate = true;
-    }
+    restingResolved =
+      recentResting.length > 0
+        ? recentResting.reduce((s, v) => s + v, 0) / recentResting.length
+        : BASELINE_BMR;
+    burnedIsEstimate = true;
   }
 
-  const burnedToday = restingResolved !== null ? restingResolved + activeResolved : (todayMetrics?.total_calories_burned ?? null);
+  const burnedToday = restingResolved + activeResolved;
 
   return NextResponse.json({
     budget: settingsRes.data?.value ?? 2000,

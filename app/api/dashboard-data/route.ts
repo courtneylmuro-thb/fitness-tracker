@@ -18,6 +18,63 @@ const TIMEZONE = "America/Los_Angeles";
 // weight changes meaningfully.
 const BASELINE_BMR = 1214;
 
+// Cross-reference the three workout sources (Apple Watch `apple_health`, voice
+// `manual`, Google Calendar `calendar`) so one real session isn't counted
+// multiple times. Rows whose time windows OVERLAP are treated as the same
+// session; an untimed voice log attaches to a same-day session that shares a
+// word in its type. One representative row is kept per session (prefer the most
+// descriptive title; de-emphasize generic Apple Watch labels like "Pilates").
+// Non-destructive: this only affects what the dashboard shows/counts, not the DB.
+function dedupeWorkouts(raw: any[]): any[] {
+  const ms = (t: any) => (t ? Date.parse(t) : null);
+  const timed = raw
+    .filter((w) => w.start_time)
+    .map((w) => ({ ...w, _s: ms(w.start_time) as number, _e: (ms(w.end_time) ?? (ms(w.start_time) as number) + 3600000) as number }))
+    .sort((a, b) => a._s - b._s);
+  const untimed = raw.filter((w) => !w.start_time);
+
+  const sessions: any[][] = [];
+  for (const w of timed) {
+    const sess = sessions.find((s) => s.some((m) => w._s < m._e && m._s < w._e));
+    if (sess) sess.push(w);
+    else sessions.push([w]);
+  }
+
+  const toks = (s: string) =>
+    (s || "").toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter((x) => x.length > 3);
+  for (const u of untimed) {
+    const ut = toks(u.workout_type);
+    const sess = sessions.find(
+      (s) => s[0].date === u.date && s.some((m) => toks(m.workout_type).some((t) => ut.includes(t)))
+    );
+    if (sess) sess.push(u);
+    else sessions.push([u]);
+  }
+
+  const genericAH = /^(functional strength training|traditional strength training|strength training|core training|high intensity interval training|pilates|yoga|outdoor walk|indoor walk|walk|run|outdoor run|cooldown|workout)$/i;
+  const score = (w: any) => {
+    let s = (w.workout_type || "").length;
+    if (w.source === "apple_health" && genericAH.test((w.workout_type || "").trim())) s -= 20;
+    if (w.source === "calendar") s += 3;
+    return s;
+  };
+
+  const reps = sessions.map((s) => {
+    const rep: any = { ...s.slice().sort((a, b) => score(b) - score(a))[0] };
+    rep.sources = Array.from(new Set(s.map((m) => m.source)));
+    if (rep.duration_min == null) {
+      const d = s.map((m) => m.duration_min).find((x) => x != null);
+      if (d != null) rep.duration_min = d;
+    }
+    delete rep._s;
+    delete rep._e;
+    return rep;
+  });
+
+  reps.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  return reps;
+}
+
 function pacificDateString(d: Date): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: TIMEZONE,
@@ -47,7 +104,7 @@ export async function GET(req: NextRequest) {
   // more days accumulate, rather than actually backfilling anything.)
   const yearAgo = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);
 
-  const [metricsRes, foodTodayRes, bodyRes, workoutsRes, settingsRes, vacationRes] =
+  const [metricsRes, foodTodayRes, bodyRes, workoutsRes, settingsRes, vacationRes, treatmentsRes] =
     await Promise.all([
       supabase.from("daily_metrics").select("*").gte("date", yearAgo).order("date"),
       supabase.from("food_logs").select("*").gte("logged_at", dayStart).lte("logged_at", dayEnd).order("logged_at"),
@@ -55,6 +112,7 @@ export async function GET(req: NextRequest) {
       supabase.from("workouts").select("*").gte("date", yearAgo).order("date", { ascending: false }),
       supabase.from("settings").select("*").eq("key", "daily_calorie_budget").single(),
       supabase.from("vacation_days").select("*").eq("date", today).maybeSingle(),
+      supabase.from("treatments").select("*").order("date", { ascending: false }).limit(20),
     ]);
 
   const foodToday = foodTodayRes.data || [];
@@ -119,6 +177,7 @@ export async function GET(req: NextRequest) {
     metrics,
     foodToday,
     body: bodyRes.data || [],
-    workouts: workoutsRes.data || [],
+    workouts: dedupeWorkouts(workoutsRes.data || []),
+    treatments: treatmentsRes.data || [],
   });
 }

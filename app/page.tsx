@@ -54,7 +54,8 @@ type DashboardData = {
   }>;
   foodToday: FoodToday[];
   body: Array<{ date: string; body_fat_pct: number | null; skeletal_muscle_mass_lbs: number | null; weight_lbs: number | null }>;
-  workouts: Array<{ id: string; date: string; workout_type: string; duration_min: number | null; calories: number | null; source: string }>;
+  workouts: Array<{ id: string; date: string; workout_type: string; duration_min: number | null; calories: number | null; source: string; sources?: string[] }>;
+  treatments: Array<{ id: string; date: string; name: string | null; detail: string | null }>;
 };
 
 // Formats a count of calories the way Courtney wants it read at a glance:
@@ -650,6 +651,26 @@ export default function Dashboard() {
             </LineChart>
           </ResponsiveContainer>
         )}
+      </div>
+
+      <div className="card">
+        <h2>Treatments</h2>
+        {(data?.treatments?.length ?? 0) === 0 && (
+          <div className="empty">No treatments yet. Say something like “NAD+ IV” in Log to add one.</div>
+        )}
+        {data?.treatments.map((t) => (
+          <div key={t.id} style={{ padding: "8px 0", borderBottom: "1px solid #f2f2f7" }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>💧 {t.name || "Treatment"}</span>
+              <span className="subtle">{t.date.slice(5)}</span>
+            </div>
+            {t.detail && (
+              <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>
+                {t.detail}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
 
       <div className="card">

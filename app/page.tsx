@@ -283,6 +283,9 @@ export default function Dashboard() {
   const [editCal, setEditCal] = useState("");
   const [editQty, setEditQty] = useState("1");
   const [editDate, setEditDate] = useState("");
+  const [editUnitCal, setEditUnitCal] = useState(0);
+  const [editRecalc, setEditRecalc] = useState<{ protein_g: number | null; carbs_g: number | null; fat_g: number | null } | null>(null);
+  const [recalcing, setRecalcing] = useState(false);
   const [rowBusy, setRowBusy] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -328,6 +331,8 @@ export default function Dashboard() {
     setEditDesc(f.description);
     setEditCal(f.estimated_calories != null ? String(Math.round(f.estimated_calories)) : "");
     setEditQty(f.quantity != null && f.quantity > 0 ? String(f.quantity) : "1");
+    setEditUnitCal(f.estimated_calories != null ? f.estimated_calories / (f.quantity && f.quantity > 0 ? f.quantity : 1) : 0);
+    setEditRecalc(null);
     // logged_at comes back as a full timestamp (e.g. "2026-09-28T12:00:00");
     // the date input only wants the leading YYYY-MM-DD.
     setEditDate((f.logged_at || "").slice(0, 10) || localDateKey(selectedDate));
@@ -336,6 +341,32 @@ export default function Dashboard() {
   function cancelEdit() {
     setEditingId(null);
     setRowError(null);
+  }
+
+  // Re-estimate calories/macros from the (edited) description, so correcting
+  // the words refreshes the numbers. Resets count to 1 since the estimate is
+  // for the described amount.
+  async function recalcEdit() {
+    if (!editDesc.trim()) return;
+    setRecalcing(true);
+    setRowError(null);
+    try {
+      const res = await fetch("/api/estimate-food", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ description: editDesc }),
+      });
+      const r = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(r.error || "Couldn't recalculate");
+      setEditUnitCal(r.calories ?? 0);
+      setEditQty("1");
+      if (r.calories != null) setEditCal(String(Math.round(r.calories)));
+      setEditRecalc({ protein_g: r.protein_g ?? null, carbs_g: r.carbs_g ?? null, fat_g: r.fat_g ?? null });
+    } catch (e: any) {
+      setRowError(e.message || "Couldn't recalculate");
+    } finally {
+      setRecalcing(false);
+    }
   }
 
   async function saveEdit(id: string) {
@@ -347,9 +378,17 @@ export default function Dashboard() {
       const newQty = Math.max(1, Number(editQty) || 1);
       const scale = newQty / origQty;
       const payload: any = { description: editDesc, estimated_calories: editCal, date: editDate, quantity: newQty };
-      if (orig?.protein_g != null) payload.protein_g = Math.round(orig.protein_g * scale);
-      if (orig?.carbs_g != null) payload.carbs_g = Math.round(orig.carbs_g * scale);
-      if (orig?.fat_g != null) payload.fat_g = Math.round(orig.fat_g * scale);
+      if (editRecalc) {
+        // Numbers came from a fresh re-estimate of the new description (per 1
+        // serving); scale to the chosen count.
+        if (editRecalc.protein_g != null) payload.protein_g = Math.round(editRecalc.protein_g * newQty);
+        if (editRecalc.carbs_g != null) payload.carbs_g = Math.round(editRecalc.carbs_g * newQty);
+        if (editRecalc.fat_g != null) payload.fat_g = Math.round(editRecalc.fat_g * newQty);
+      } else {
+        if (orig?.protein_g != null) payload.protein_g = Math.round(orig.protein_g * scale);
+        if (orig?.carbs_g != null) payload.carbs_g = Math.round(orig.carbs_g * scale);
+        if (orig?.fat_g != null) payload.fat_g = Math.round(orig.fat_g * scale);
+      }
       const res = await fetch(`/api/food-log/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
@@ -611,6 +650,15 @@ export default function Dashboard() {
                 placeholder="Description"
                 style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #e0ddd6", fontSize: 14 }}
               />
+              <button
+                className="btn btn-secondary"
+                onClick={recalcEdit}
+                disabled={recalcing || !editDesc.trim()}
+                style={{ padding: "6px 10px", fontSize: 13, alignSelf: "flex-start" }}
+                title="Re-estimate calories from these words"
+              >
+                {recalcing ? "Recalculating…" : "↻ Recalculate from description"}
+              </button>
               <div className="row" style={{ gap: 8 }}>
                 <input
                   type="text"
@@ -619,9 +667,7 @@ export default function Dashboard() {
                   onChange={(e) => {
                     const q = Math.max(1, Number(e.target.value.replace(/[^0-9]/g, "")) || 1);
                     setEditQty(String(q));
-                    const origQty = f.quantity && f.quantity > 0 ? f.quantity : 1;
-                    if (f.estimated_calories != null)
-                      setEditCal(String(Math.round((f.estimated_calories / origQty) * q)));
+                    if (editUnitCal) setEditCal(String(Math.round(editUnitCal * q)));
                   }}
                   placeholder="Qty"
                   aria-label="Count"

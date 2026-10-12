@@ -14,6 +14,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (body.protein_g != null && body.protein_g !== "") updates.protein_g = Number(body.protein_g);
     if (body.carbs_g != null && body.carbs_g !== "") updates.carbs_g = Number(body.carbs_g);
     if (body.fat_g != null && body.fat_g !== "") updates.fat_g = Number(body.fat_g);
+    if (body.quantity != null && body.quantity !== "") updates.quantity = Number(body.quantity);
     // Moving an entry to a different day. `date` comes in as a plain
     // YYYY-MM-DD from the dashboard's <input type="date">; store it at noon
     // local-ish (matching the same convention the log-entry route uses for

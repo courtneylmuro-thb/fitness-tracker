@@ -32,6 +32,7 @@ type FoodToday = {
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
+  quantity: number | null;
   logged_at: string;
 };
 
@@ -280,6 +281,7 @@ export default function Dashboard() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDesc, setEditDesc] = useState("");
   const [editCal, setEditCal] = useState("");
+  const [editQty, setEditQty] = useState("1");
   const [editDate, setEditDate] = useState("");
   const [rowBusy, setRowBusy] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -325,6 +327,7 @@ export default function Dashboard() {
     setEditingId(f.id);
     setEditDesc(f.description);
     setEditCal(f.estimated_calories != null ? String(Math.round(f.estimated_calories)) : "");
+    setEditQty(f.quantity != null && f.quantity > 0 ? String(f.quantity) : "1");
     // logged_at comes back as a full timestamp (e.g. "2026-09-28T12:00:00");
     // the date input only wants the leading YYYY-MM-DD.
     setEditDate((f.logged_at || "").slice(0, 10) || localDateKey(selectedDate));
@@ -339,10 +342,18 @@ export default function Dashboard() {
     setRowBusy(true);
     setRowError(null);
     try {
+      const orig = data?.foodToday.find((x) => x.id === id);
+      const origQty = orig && orig.quantity && orig.quantity > 0 ? orig.quantity : 1;
+      const newQty = Math.max(1, Number(editQty) || 1);
+      const scale = newQty / origQty;
+      const payload: any = { description: editDesc, estimated_calories: editCal, date: editDate, quantity: newQty };
+      if (orig?.protein_g != null) payload.protein_g = Math.round(orig.protein_g * scale);
+      if (orig?.carbs_g != null) payload.carbs_g = Math.round(orig.carbs_g * scale);
+      if (orig?.fat_g != null) payload.fat_g = Math.round(orig.fat_g * scale);
       const res = await fetch(`/api/food-log/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ description: editDesc, estimated_calories: editCal, date: editDate }),
+        body: JSON.stringify(payload),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || "Couldn't save");
@@ -604,10 +615,26 @@ export default function Dashboard() {
                 <input
                   type="text"
                   inputMode="numeric"
+                  value={editQty}
+                  onChange={(e) => {
+                    const q = Math.max(1, Number(e.target.value.replace(/[^0-9]/g, "")) || 1);
+                    setEditQty(String(q));
+                    const origQty = f.quantity && f.quantity > 0 ? f.quantity : 1;
+                    if (f.estimated_calories != null)
+                      setEditCal(String(Math.round((f.estimated_calories / origQty) * q)));
+                  }}
+                  placeholder="Qty"
+                  aria-label="Count"
+                  title="How many you ate — changes calories automatically"
+                  style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #e0ddd6", fontSize: 14, width: 56 }}
+                />
+                <input
+                  type="text"
+                  inputMode="numeric"
                   value={editCal}
                   onChange={(e) => setEditCal(e.target.value.replace(/[^0-9]/g, ""))}
                   placeholder="Calories"
-                  style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #e0ddd6", fontSize: 14, width: 120 }}
+                  style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #e0ddd6", fontSize: 14, width: 110 }}
                 />
                 <input
                   type="date"
@@ -628,7 +655,10 @@ export default function Dashboard() {
             </div>
           ) : (
             <div key={f.id} className="food-entry">
-              <span style={{ flex: 1, minWidth: 0 }}>{f.description}</span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                {f.description}
+                {f.quantity && f.quantity > 1 ? ` ×${f.quantity}` : ""}
+              </span>
               <span style={{ textAlign: "right", display: "flex", alignItems: "center", gap: 6 }}>
                 <span>
                   <span>{f.estimated_calories ? `${formatCal(f.estimated_calories)} cal` : "—"}</span>

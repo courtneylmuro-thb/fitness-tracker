@@ -12,6 +12,8 @@ import {
   BarChart,
   Bar,
   Legend,
+  ComposedChart,
+  ReferenceArea,
 } from "recharts";
 
 // Brand palette (see thb-brand-kit) -- teal is the primary/"good" color,
@@ -51,11 +53,14 @@ type DashboardData = {
     resting_calories: number | null;
     weight_lbs: number | null;
     steps: number | null;
+    feeling_score: number | null;
   }>;
   foodToday: FoodToday[];
   body: Array<{ date: string; body_fat_pct: number | null; skeletal_muscle_mass_lbs: number | null; weight_lbs: number | null }>;
   workouts: Array<{ id: string; date: string; workout_type: string; duration_min: number | null; calories: number | null; source: string; sources?: string[] }>;
   treatments: Array<{ id: string; date: string; name: string | null; detail: string | null }>;
+  alcoholByDay: Array<{ date: string; drinks: number }>;
+  vacationDays: string[];
 };
 
 // Formats a count of calories the way Courtney wants it read at a glance:
@@ -410,6 +415,71 @@ export default function Dashboard() {
     }));
   const weightTrend = weightTrendAll.slice(-RANGE_DAYS[weightRange]);
 
+  // --- Booze tracker: drinks/day with the NEXT day's mood overlaid (the lag) ---
+  const moodByDate: Record<string, number> = {};
+  (data?.metrics || []).forEach((m) => {
+    if (m.feeling_score != null) moodByDate[m.date] = m.feeling_score;
+  });
+  const drinksByDate: Record<string, number> = {};
+  (data?.alcoholByDay || []).forEach((a) => {
+    drinksByDate[a.date] = a.drinks;
+  });
+  const boozeData = (() => {
+    const out: { date: string; drinks: number; nextMood: number | null }[] = [];
+    const base = new Date();
+    for (let i = 44; i >= 0; i--) {
+      const d = new Date(base);
+      d.setDate(base.getDate() - i);
+      const key = localDateKey(d);
+      const next = new Date(d);
+      next.setDate(d.getDate() + 1);
+      out.push({ date: key.slice(5), drinks: drinksByDate[key] ?? 0, nextMood: moodByDate[localDateKey(next)] ?? null });
+    }
+    return out;
+  })();
+  const hasBooze = (data?.alcoholByDay || []).some((a) => a.drinks > 0);
+
+  // --- Vacation impact: weight/muscle/body-fat indexed to 100 at first reading,
+  // on a daily timeline with vacation periods shaded. Fills in as data grows. ---
+  const vacSet = new Set(data?.vacationDays || []);
+  const bodyByDate: Record<string, any> = {};
+  (data?.body || []).forEach((b) => { bodyByDate[b.date] = b; });
+  const firstOf = (sel: (b: any) => number | null) =>
+    (data?.body || []).map(sel).find((x) => x != null) ?? null;
+  const w0 = firstOf((b) => b.weight_lbs);
+  const m0 = firstOf((b) => b.skeletal_muscle_mass_lbs);
+  const f0 = firstOf((b) => b.body_fat_pct);
+  const idx = (v: number | null | undefined, base0: number | null) =>
+    v != null && base0 ? Math.round((v / base0) * 1000) / 10 : null;
+  const vacData = (() => {
+    const out: { date: string; weight: number | null; muscle: number | null; bodyFat: number | null; vac: number | null }[] = [];
+    const base = new Date();
+    for (let i = 119; i >= 0; i--) {
+      const d = new Date(base);
+      d.setDate(base.getDate() - i);
+      const key = localDateKey(d);
+      const b = bodyByDate[key];
+      out.push({
+        date: key.slice(5),
+        weight: b ? idx(b.weight_lbs, w0) : null,
+        muscle: b ? idx(b.skeletal_muscle_mass_lbs, m0) : null,
+        bodyFat: b ? idx(b.body_fat_pct, f0) : null,
+        vac: vacSet.has(key) ? 1 : null,
+      });
+    }
+    return out;
+  })();
+  const vacRanges: { x1: string; x2: string }[] = [];
+  for (let i = 0; i < vacData.length; i++) {
+    if (vacData[i].vac) {
+      let j = i;
+      while (j + 1 < vacData.length && vacData[j + 1].vac) j++;
+      vacRanges.push({ x1: vacData[i].date, x2: vacData[j].date });
+      i = j;
+    }
+  }
+  const hasVacData = vacRanges.length > 0 || vacData.some((d) => d.weight != null || d.muscle != null || d.bodyFat != null);
+
   return (
     <div className="container">
       <div className="row" style={{ justifyContent: "center", alignItems: "center", gap: 14, marginBottom: 4 }}>
@@ -649,6 +719,53 @@ export default function Dashboard() {
               <Line type="monotone" dataKey="bodyFat" name="Body fat %" stroke={CORAL} strokeWidth={2} dot={false} />
               <Line type="monotone" dataKey="muscle" name="Skeletal muscle (lb)" stroke={TEAL} strokeWidth={2} dot={false} />
             </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>🍷 Booze & next-day mood</h2>
+        {!hasBooze && (
+          <div className="subtle" style={{ marginBottom: 8 }}>
+            No drinks logged yet. Tell the app when you drink (e.g. “two glasses of wine”) — bars appear here, with how you felt the <i>next</i> day overlaid.
+          </div>
+        )}
+        <ResponsiveContainer width="100%" height={200}>
+          <ComposedChart data={boozeData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f2f2f7" />
+            <XAxis dataKey="date" fontSize={10} stroke="#86868b" interval={6} />
+            <YAxis yAxisId="left" fontSize={11} stroke="#86868b" allowDecimals={false} />
+            <YAxis yAxisId="right" orientation="right" domain={[0, 10]} fontSize={11} stroke="#86868b" />
+            <Tooltip />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar yAxisId="left" dataKey="drinks" name="Drinks" fill={CORAL} radius={[3, 3, 0, 0]} />
+            <Line yAxisId="right" type="monotone" dataKey="nextMood" name="Next-day mood (1-10)" stroke={TEAL} strokeWidth={2} connectNulls dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="card">
+        <h2>🏖️ Vacation impact</h2>
+        <div className="subtle" style={{ marginBottom: 8 }}>
+          Weight, muscle & body fat (indexed to 100 at the first reading), vacations shaded. Watch for lagged changes after a trip.
+        </div>
+        {!hasVacData ? (
+          <div className="empty">Fills in as you log body scans and take trips.</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={220}>
+            <ComposedChart data={vacData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f2f2f7" />
+              <XAxis dataKey="date" fontSize={10} stroke="#86868b" interval={14} />
+              <YAxis fontSize={11} stroke="#86868b" domain={["auto", "auto"]} />
+              <Tooltip />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              {vacRanges.map((r, i) => (
+                <ReferenceArea key={i} x1={r.x1} x2={r.x2} fill={CORAL} fillOpacity={0.12} />
+              ))}
+              <Line type="monotone" dataKey="weight" name="Weight" stroke="#2a78d6" strokeWidth={2} connectNulls dot={{ r: 2 }} />
+              <Line type="monotone" dataKey="muscle" name="Muscle" stroke={TEAL} strokeWidth={2} connectNulls dot={{ r: 2 }} />
+              <Line type="monotone" dataKey="bodyFat" name="Body fat" stroke={CORAL} strokeWidth={2} connectNulls dot={{ r: 2 }} />
+            </ComposedChart>
           </ResponsiveContainer>
         )}
       </div>

@@ -130,6 +130,7 @@ export async function POST(req: NextRequest) {
         protein_g: it.protein_g ?? null,
         carbs_g: it.carbs_g ?? null,
         fat_g: it.fat_g ?? null,
+        alcohol_drinks: it.alcohol_drinks ?? 0,
         nutrition_detail: it.nutrition_detail ?? null,
         source: imageBase64 ? "photo" : "text",
       };

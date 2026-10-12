@@ -104,7 +104,7 @@ export async function GET(req: NextRequest) {
   // more days accumulate, rather than actually backfilling anything.)
   const yearAgo = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);
 
-  const [metricsRes, foodTodayRes, bodyRes, workoutsRes, settingsRes, vacationRes, treatmentsRes] =
+  const [metricsRes, foodTodayRes, bodyRes, workoutsRes, settingsRes, vacationRes, treatmentsRes, alcoholRes, vacationsRes] =
     await Promise.all([
       supabase.from("daily_metrics").select("*").gte("date", yearAgo).order("date"),
       supabase.from("food_logs").select("*").gte("logged_at", dayStart).lte("logged_at", dayEnd).order("logged_at"),
@@ -113,6 +113,8 @@ export async function GET(req: NextRequest) {
       supabase.from("settings").select("*").eq("key", "daily_calorie_budget").single(),
       supabase.from("vacation_days").select("*").eq("date", today).maybeSingle(),
       supabase.from("treatments").select("*").order("date", { ascending: false }).limit(20),
+      supabase.from("food_logs").select("logged_at, alcohol_drinks").gte("logged_at", `${yearAgo}T00:00:00`),
+      supabase.from("vacation_days").select("date").gte("date", yearAgo),
     ]);
 
   const foodToday = foodTodayRes.data || [];
@@ -179,5 +181,14 @@ export async function GET(req: NextRequest) {
     body: bodyRes.data || [],
     workouts: dedupeWorkouts(workoutsRes.data || []),
     treatments: treatmentsRes.data || [],
+    alcoholByDay: (() => {
+      const by: Record<string, number> = {};
+      for (const r of (alcoholRes.data || []) as any[]) {
+        const d = String(r.logged_at).slice(0, 10);
+        by[d] = (by[d] || 0) + (Number(r.alcohol_drinks) || 0);
+      }
+      return Object.entries(by).map(([date, drinks]) => ({ date, drinks }));
+    })(),
+    vacationDays: ((vacationsRes.data || []) as any[]).map((v) => String(v.date).slice(0, 10)),
   });
 }

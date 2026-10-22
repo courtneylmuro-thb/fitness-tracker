@@ -59,7 +59,7 @@ type DashboardData = {
   foodToday: FoodToday[];
   body: Array<{ date: string; body_fat_pct: number | null; skeletal_muscle_mass_lbs: number | null; weight_lbs: number | null }>;
   workouts: Array<{ id: string; date: string; workout_type: string; duration_min: number | null; calories: number | null; source: string; sources?: string[] }>;
-  treatments: Array<{ id: string; date: string; name: string | null; detail: string | null }>;
+  treatments: Array<{ id: string; date: string; name: string | null; detail: string | null; amount?: string | null; category?: string | null }>;
   alcoholByDay: Array<{ date: string; drinks: number }>;
   vacationDays: string[];
 };
@@ -854,7 +854,10 @@ export default function Dashboard() {
         {data?.treatments.map((t) => (
           <div key={t.id} style={{ padding: "8px 0", borderBottom: "1px solid #f2f2f7" }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>💧 {t.name || "Treatment"}</span>
+              <span>
+                {t.category === "medication" ? "💊" : "💧"} {t.name || "Treatment"}
+                {t.amount ? ` · ${t.amount}` : ""}
+              </span>
               <span className="subtle">{t.date.slice(5)}</span>
             </div>
             {t.detail && (

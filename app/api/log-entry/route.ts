@@ -84,6 +84,8 @@ export async function POST(req: NextRequest) {
         .insert({
           name: entry.treatment_name || entry.description || "Treatment",
           detail: entry.treatment_detail ?? entry.description ?? null,
+          amount: entry.treatment_amount ?? null,
+          category: entry.treatment_category ?? "treatment",
           date: entryDate,
           source: "manual",
         })

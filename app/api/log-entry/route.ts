@@ -135,9 +135,17 @@ export async function POST(req: NextRequest) {
         nutrition_detail: it.nutrition_detail ?? null,
         source: imageBase64 ? "photo" : "text",
       };
-      // Only override the default "now" timestamp when we have an explicit date
-      // (UI date picker, or a day the text itself named).
-      if (explicitDate) row.logged_at = `${explicitDate}T12:00:00`;
+      // Per-item date: in a multi-day recap each item can name its own day
+      // (item_date). Prefer a valid, non-future item_date; else the entry-level
+      // explicit date (UI picker or a single day the text named); else leave the
+      // default "now" timestamp.
+      const itemDate =
+        typeof it.item_date === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(it.item_date) &&
+        it.item_date <= referenceDate
+          ? it.item_date
+          : explicitDate;
+      if (itemDate) row.logged_at = `${itemDate}T12:00:00`;
       return row;
     });
 

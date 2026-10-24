@@ -340,11 +340,13 @@ export async function estimateLogEntry({
   imageBase64,
   mediaType,
   referenceDate,
+  recentFoods,
 }: {
   text?: string;
   imageBase64?: string;
   mediaType?: string;
   referenceDate?: string;
+  recentFoods?: Array<{ description?: string; estimated_calories?: number; protein_g?: number; carbs_g?: number; fat_g?: number }>;
 }) {
   const content: any[] = [];
   if (imageBase64) {
@@ -358,6 +360,18 @@ export async function estimateLogEntry({
     ? referenceDate
     : new Date().toISOString().slice(0, 10);
   const todayDayName = dayNameForDate(today);
+
+  const recentList =
+    recentFoods && recentFoods.length
+      ? "\n\nRECENT FOODS she has already logged (most recent first) -- use ONLY to honor 'same as before' references, matching by name:\n" +
+        recentFoods
+          .slice(0, 25)
+          .map(
+            (r) =>
+              `- ${r.description}: ${Math.round(Number(r.estimated_calories) || 0)} cal, ${r.protein_g ?? 0}p / ${r.carbs_g ?? 0}c / ${r.fat_g ?? 0}f`
+          )
+          .join("\n")
+      : "";
 
   content.push({
     type: "text",
@@ -380,6 +394,8 @@ IMPORTANT -- keep "description" short: it must be a brief summary (roughly 100 c
 For FOOD: break the entry into SEPARATE ITEMS -- one object per distinct food or drink -- in the food_items array. Each item has its own short description (e.g. "quarter of a pizza", "turkey sandwich", "glass of white wine") and its own best-guess calories, protein_g, carbs_g, fat_g, and nutrition_detail (fiber_g, sugar_g, sodium_mg, saturated_fat_g, cholesterol_mg, potassium_mg). ALWAYS give concrete numbers for every item, never null, like an experienced dietitian eyeballing each thing. Examples: "a quarter of the pizza and a bite of the rest" -> TWO items: a quarter of a pizza (~95 cal) and a bite of pizza (~30 cal). "turkey sandwich and a latte" -> two items. A single food is just one item in the array. Only count food ALREADY eaten; ignore anything she says she is about to eat or plans to eat later -- e.g. "I just ate a fun size Twix and I'm probably gonna go to sushi later" -> one item for the Twix only (~80 cal, 1g protein, 10g carbs, 4g fat), the sushi ignored entirely. If the text contains no food that was actually eaten, it is NOT a food entry -- reconsider whether it's a weigh-in, workout, period, or treatment. Put a brief overall summary in the top-level description and leave the top-level calories/protein/carbs/fat/nutrition_detail null -- the per-item numbers in food_items are what matter. For any ALCOHOLIC item, also set alcohol_drinks to the number of STANDARD drinks it represents (1 beer = 1, 1 glass of wine = 1, 1 cocktail or shot = 1, a bottle of wine ~= 5); for every non-alcoholic item set alcohol_drinks to 0. Also set quantity to how many of that exact same item she ate (e.g. "two rice balls" -> ONE item with quantity 2 and calories/macros covering both; "a rice ball and a banana" -> two separate items each quantity 1). Default quantity to 1.
 
 CRITICAL -- MULTI-DAY ENTRIES: if the person describes foods from DIFFERENT days in one message (e.g. "Friday I ate out, Saturday I drank a lot, Sunday I had a donut and a big dinner, Monday and Tuesday I ate ~5000 cal each, today I had a burrito"), you MUST create separate items for each day and set each item's item_date (YYYY-MM-DD) to the actual day it was eaten, resolved relative to today (${today}). A bare weekday name means the most recent PAST occurrence of that day at or before today (e.g. on a Wednesday, "last Friday/Saturday" = the Friday/Saturday 5 and 4 days ago). "yesterday" = ${today} minus 1 day; "today"/no-day-mentioned = today. NEVER dump a multi-day recap into one giant item -- break it fully into the individual foods and drinks across their correct days, each with its own item_date, calories, and alcohol_drinks. For single-day entries, leave item_date null.
+
+SAME-AS-BEFORE / REPEAT FOODS: if she references a food she already ate (e.g. "the chocolate from yesterday, I ate it again today", "same Indian dinner as last night", "the usual salad"), find the matching item in the RECENT FOODS list (provided at the end of this prompt) and REUSE its exact description, calories, and macros -- do NOT re-estimate different numbers for the same food. Log it ONCE on the day she actually ate it (today unless she clearly names another day). NEVER create a separate entry for the referenced past day, and NEVER put "(yesterday)", "(tonight)", or "(same amount)" in the description -- the description is just the clean food name (e.g. "80% of a dark chocolate bar").${recentList}
 
 For WORKOUT: parse the duration in minutes directly out of what was said if a time is mentioned (e.g. "sixty minutes" -> 60); if no duration was mentioned, use null.
 

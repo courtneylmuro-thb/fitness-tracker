@@ -40,7 +40,34 @@ export async function POST(req: NextRequest) {
     // "yesterday I had..."). Same fallback as entryDate below, so the two stay
     // in sync.
     const referenceDate = date || new Date().toISOString().slice(0, 10);
-    const entry = await estimateLogEntry({ text, imageBase64, mediaType, referenceDate });
+
+    // Pull her recent foods (last 14 days, de-duped by name) so the classifier
+    // can honor "same as yesterday / same as last time" references -- reusing
+    // the exact calories/macros of a food she already logged instead of
+    // re-estimating a different number.
+    let recentFoods: any[] = [];
+    try {
+      const sb = getSupabaseAdmin();
+      const since = new Date(Date.now() - 14 * 86400000).toISOString();
+      const { data: recent } = await sb
+        .from("food_logs")
+        .select("description, estimated_calories, protein_g, carbs_g, fat_g")
+        .gte("logged_at", since)
+        .order("logged_at", { ascending: false })
+        .limit(80);
+      const seen = new Set<string>();
+      for (const r of recent || []) {
+        const key = (r.description || "").toLowerCase().trim();
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          recentFoods.push(r);
+        }
+      }
+    } catch {
+      // recent-foods context is a nice-to-have; ignore failures
+    }
+
+    const entry = await estimateLogEntry({ text, imageBase64, mediaType, referenceDate, recentFoods });
     const supabase = getSupabaseAdmin();
 
     // If the entry text itself named a specific day (e.g. logged today but

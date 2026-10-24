@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { estimateLogEntry } from "@/lib/anthropic";
 
+// Allow up to 60s: the AI classify/estimate (sometimes two calls with a retry)
+// can exceed the default 10s and time out the HTTP response WHILE the insert
+// still succeeds -- which made the app say "not logged", the user retry, and
+// duplicate the entry (e.g. gabapentin logged 3x). More time = no false failure.
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   try {
     const { text, imageBase64, mediaType, date, saved } = await req.json();

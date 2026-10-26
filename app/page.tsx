@@ -665,8 +665,9 @@ export default function Dashboard() {
                   inputMode="numeric"
                   value={editQty}
                   onChange={(e) => {
-                    const q = Math.max(1, Number(e.target.value.replace(/[^0-9]/g, "")) || 1);
-                    setEditQty(String(q));
+                    const raw = e.target.value.replace(/[^0-9]/g, "");
+                    setEditQty(raw);
+                    const q = Math.max(1, Number(raw) || 1);
                     if (editUnitCal) setEditCal(String(Math.round(editUnitCal * q)));
                   }}
                   placeholder="Qty"

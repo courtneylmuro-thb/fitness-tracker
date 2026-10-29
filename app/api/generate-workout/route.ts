@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { chatWorkout } from "@/lib/anthropic";
 
+// Vision + generation can take a while; avoid the 10s timeout that would make
+// the request fail even though it's still working.
+export const maxDuration = 60;
+
 // Conversational workout generation. The client sends the full message
 // history so far (she talks, we ask a clarifying question or two, she
 // answers, we generate -- and she can keep talking afterward to adjust it).

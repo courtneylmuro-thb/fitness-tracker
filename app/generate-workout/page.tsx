@@ -196,18 +196,44 @@ export default function GenerateWorkoutPage() {
 
   async function handlePhotos(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
-    const b64s = await Promise.all(
-      files.map(
-        (f) =>
-          new Promise<string>((resolve, reject) => {
-            const r = new FileReader();
-            r.onload = () => resolve((r.result as string).split(",")[1]);
-            r.onerror = reject;
-            r.readAsDataURL(f);
-          })
-      )
-    );
-    setPendingImages((prev) => [...prev, ...b64s]);
+    // Resize to max 1024px and re-encode as JPEG in the browser. This keeps the
+    // request small (iPhone photos are several MB each; 5 of them blow past
+    // Vercel's request limit) and converts HEIC/PNG into JPEG, which the AI
+    // vision API accepts.
+    const toJpeg = (f: File) =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            const maxDim = 1024;
+            let w = img.width;
+            let h = img.height;
+            if (Math.max(w, h) > maxDim) {
+              const s = maxDim / Math.max(w, h);
+              w = Math.round(w * s);
+              h = Math.round(h * s);
+            }
+            const canvas = document.createElement("canvas");
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return reject(new Error("no canvas"));
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL("image/jpeg", 0.7).split(",")[1]);
+          };
+          img.onerror = () => reject(new Error("couldn't read that image"));
+          img.src = reader.result as string;
+        };
+        reader.onerror = () => reject(new Error("couldn't read that image"));
+        reader.readAsDataURL(f);
+      });
+    try {
+      const b64s = await Promise.all(files.map(toJpeg));
+      setPendingImages((prev) => [...prev, ...b64s]);
+    } catch {
+      setError("One of those photos couldn't be read — try another.");
+    }
     e.target.value = "";
   }
 
@@ -249,7 +275,6 @@ export default function GenerateWorkoutPage() {
     if ((!text && imgs.length === 0) || loading) return;
     setError(null);
     setInput("");
-    setPendingImages([]);
     const shownText = text || `📷 Sent ${imgs.length} photo${imgs.length > 1 ? "s" : ""}`;
     setBubbles((prev) => [...prev, { role: "user", text: shownText }]);
     const newHistory: ApiMsg[] = [
@@ -267,6 +292,7 @@ export default function GenerateWorkoutPage() {
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || "Something went wrong generating that.");
+      setPendingImages([]);
 
       setHistory((prev) => [...prev, { role: "assistant", content: JSON.stringify(data) }]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 const TEAL = "#3c6364";
@@ -18,6 +18,8 @@ type Workout = {
   main: string[];
   cooldown: string[];
   notes?: string;
+  equipment?: string[];
+  offer_save_place?: boolean;
 };
 
 function localDateStr() {
@@ -178,6 +180,59 @@ export default function GenerateWorkoutPage() {
   const [feedbackNotes, setFeedbackNotes] = useState("");
   const [logging, setLogging] = useState(false);
   const [logged, setLogged] = useState(false);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [places, setPlaces] = useState<{ id: string; name: string }[]>([]);
+  const [saveName, setSaveName] = useState("");
+  const [savedPlace, setSavedPlace] = useState(false);
+  const [savingPlace, setSavingPlace] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch("/api/workout-places")
+      .then((r) => r.json())
+      .then((d) => Array.isArray(d) && setPlaces(d))
+      .catch(() => {});
+  }, []);
+
+  async function handlePhotos(e: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    const b64s = await Promise.all(
+      files.map(
+        (f) =>
+          new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve((r.result as string).split(",")[1]);
+            r.onerror = reject;
+            r.readAsDataURL(f);
+          })
+      )
+    );
+    setPendingImages((prev) => [...prev, ...b64s]);
+    e.target.value = "";
+  }
+
+  async function savePlace() {
+    if (!workout || !saveName.trim()) return;
+    setSavingPlace(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/workout-places", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: saveName.trim(), equipment: workout.equipment || [] }),
+      });
+      if (!res.ok) throw new Error("Couldn't save the place");
+      setSavedPlace(true);
+      fetch("/api/workout-places")
+        .then((r) => r.json())
+        .then((d) => Array.isArray(d) && setPlaces(d))
+        .catch(() => {});
+    } catch (e: any) {
+      setError(e.message || "Couldn't save the place.");
+    } finally {
+      setSavingPlace(false);
+    }
+  }
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -190,11 +245,17 @@ export default function GenerateWorkoutPage() {
 
   async function send(textOverride?: string) {
     const text = (textOverride ?? input).trim();
-    if (!text || loading) return;
+    const imgs = pendingImages;
+    if ((!text && imgs.length === 0) || loading) return;
     setError(null);
     setInput("");
-    setBubbles((prev) => [...prev, { role: "user", text }]);
-    const newHistory: ApiMsg[] = [...history, { role: "user", content: text }];
+    setPendingImages([]);
+    const shownText = text || `📷 Sent ${imgs.length} photo${imgs.length > 1 ? "s" : ""}`;
+    setBubbles((prev) => [...prev, { role: "user", text: shownText }]);
+    const newHistory: ApiMsg[] = [
+      ...history,
+      { role: "user", content: text || "Here's where I'm working out -- build me a workout from what you see." },
+    ];
     setHistory(newHistory);
     setLoading(true);
 
@@ -202,7 +263,7 @@ export default function GenerateWorkoutPage() {
       const res = await fetch("/api/generate-workout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages: newHistory }),
+        body: JSON.stringify({ messages: newHistory, images: imgs }),
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || "Something went wrong generating that.");
@@ -216,6 +277,8 @@ export default function GenerateWorkoutPage() {
         setActualMinutes(String(data.estimated_duration_min ?? ""));
         setLogged(false);
         setShowFeedback(false);
+        setSavedPlace(false);
+        setSaveName("");
         setBubbles((prev) => [
           ...prev,
           { role: "assistant", text: `Here's your workout: ${data.title}. Take a look below -- tell me if you want anything changed.` },
@@ -307,6 +370,33 @@ export default function GenerateWorkoutPage() {
 
       {error && <div style={{ color: "#b3261e", fontSize: 14, marginBottom: 10 }}>{error}</div>}
 
+      {places.length > 0 && !workout && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "#888" }}>Quick start:</span>
+          {places.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => send(`Give me a workout at my ${p.name}`)}
+              style={{ border: `1px solid ${BORDER}`, background: "#fff", borderRadius: 999, padding: "5px 12px", fontSize: 13, cursor: "pointer" }}
+            >
+              📍 {p.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {pendingImages.length > 0 && (
+        <div style={{ fontSize: 13, color: TEAL, marginBottom: 8 }}>
+          📷 {pendingImages.length} photo{pendingImages.length > 1 ? "s" : ""} attached — hit Send.{" "}
+          <button
+            onClick={() => setPendingImages([])}
+            style={{ border: "none", background: "none", color: "#888", textDecoration: "underline", cursor: "pointer", fontSize: 13 }}
+          >
+            clear
+          </button>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
         <input
           value={input}
@@ -324,6 +414,14 @@ export default function GenerateWorkoutPage() {
             outline: "none",
           }}
         />
+        <input ref={photoInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handlePhotos} />
+        <button
+          onClick={() => photoInputRef.current?.click()}
+          title="Add photos of where you are"
+          style={{ border: `1px solid ${BORDER}`, background: "#fff", borderRadius: 999, padding: "0 14px", fontSize: 16, cursor: "pointer" }}
+        >
+          📷
+        </button>
         <MicButton
           listening={composerSpeech.listening}
           transcribing={composerSpeech.transcribing}
@@ -331,7 +429,7 @@ export default function GenerateWorkoutPage() {
         />
         <button
           onClick={() => send()}
-          disabled={loading || !input.trim()}
+          disabled={loading || (!input.trim() && pendingImages.length === 0)}
           style={{
             border: "none",
             borderRadius: 999,
@@ -340,8 +438,8 @@ export default function GenerateWorkoutPage() {
             color: "#fff",
             fontWeight: 600,
             fontSize: 15,
-            cursor: loading || !input.trim() ? "default" : "pointer",
-            opacity: loading || !input.trim() ? 0.5 : 1,
+            cursor: loading || (!input.trim() && pendingImages.length === 0) ? "default" : "pointer",
+            opacity: loading || (!input.trim() && pendingImages.length === 0) ? 0.5 : 1,
           }}
         >
           Send
@@ -440,6 +538,44 @@ export default function GenerateWorkoutPage() {
 
           {logged && (
             <div style={{ marginTop: 16, color: TEAL, fontWeight: 600, fontSize: 14 }}>✓ Logged. Nice work.</div>
+          )}
+
+          {workout.offer_save_place && !savedPlace && (
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${BORDER}` }}>
+              <div style={{ fontSize: 13, color: "#555", marginBottom: 8 }}>
+                💾 Save this spot so you won't need photos next time?
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  placeholder="e.g. home gym"
+                  style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: `1px solid ${BORDER}`, fontSize: 14 }}
+                />
+                <button
+                  onClick={savePlace}
+                  disabled={savingPlace || !saveName.trim()}
+                  style={{
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "8px 16px",
+                    background: TEAL,
+                    color: "#fff",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    cursor: savingPlace || !saveName.trim() ? "default" : "pointer",
+                    opacity: savingPlace || !saveName.trim() ? 0.6 : 1,
+                  }}
+                >
+                  {savingPlace ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          )}
+          {savedPlace && (
+            <div style={{ marginTop: 14, color: TEAL, fontSize: 13 }}>
+              ✓ Saved. Next time just say "a workout at my {saveName}".
+            </div>
           )}
         </div>
       )}

@@ -8,14 +8,26 @@ import { chatWorkout } from "@/lib/anthropic";
 // Returns either {type:"question", question} or a full {type:"workout", ...}.
 export async function POST(req: NextRequest) {
   try {
-    const { messages } = await req.json();
+    const { messages, images } = await req.json();
     if (!Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(
-        { type: "question", question: "Where are you working out today, and how long do you have?" },
+        { type: "question", question: "Where are you working out today, and how long do you have? (You can also just snap photos of the space.)" },
         { status: 200 }
       );
     }
-    const result = await chatWorkout(messages);
+    // Load her saved places so she can just say "my home gym" without photos.
+    let places: any[] = [];
+    try {
+      const sb = getSupabaseAdmin();
+      const { data } = await sb
+        .from("workout_places")
+        .select("name, equipment")
+        .order("created_at", { ascending: false });
+      places = data || [];
+    } catch {
+      /* places are a nice-to-have */
+    }
+    const result = await chatWorkout(messages, Array.isArray(images) ? images : undefined, places);
     return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json({ error: err.message ?? "Unknown error" }, { status: 500 });

@@ -292,23 +292,57 @@ function ensureAbsBlock(workout: any) {
 // full back-and-forth so far, alternating user/assistant turns; assistant
 // turns are the raw JSON this function itself returned on a prior call, so
 // the model has full context to adjust a workout Courtney is pushing back on.
-export async function chatWorkout(history: { role: "user" | "assistant"; content: string }[]) {
+export async function chatWorkout(
+  history: { role: "user" | "assistant"; content: string }[],
+  images?: string[],
+  places?: { name: string; equipment?: string | null }[]
+) {
+  const placeList =
+    places && places.length
+      ? `\n\nHER SAVED PLACES (if she names one, e.g. "my home gym", use its equipment and do NOT ask her to list it again):\n` +
+        places.map((p) => `- ${p.name}: ${p.equipment || "(equipment not listed)"}`).join("\n")
+      : "";
+
   const system = `You are building a single on-demand workout for Courtney inside her personal fitness app, through a back-and-forth conversation -- she talks to you, there's no form to fill out.
 
-She'll describe what she's got in her own words, e.g. "I'm at my home gym and I want a 25 minute workout focused on my butt." Pull out whatever she's already told you: location/equipment, duration, and focus.
+She'll describe what she's got, or SEND PHOTOS of where she is. If photos are attached, IDENTIFY the available equipment from them (machines, dumbbells, bands, bench, mat, kettlebells, etc.) and build the workout around what you can actually see -- never ask her to list equipment that's visible in a photo.
 
-Ask a SHORT clarifying question -- one at a time, conversationally -- ONLY if you genuinely need it to build a safe, sensible workout: for example, what specific equipment she has at a "home gym" or "gym" she mentioned (e.g. does she have a barbell), or whether she has any injuries or pain to work around. Do not ask about anything she's already told you, and never ask more than one question in a single turn. Once you have enough to build something reasonable, just generate the workout -- don't over-clarify or stall.
+Ask a SHORT clarifying question -- one at a time -- ONLY if you genuinely need it (e.g. duration or focus if she hasn't said, or an injury to work around). Never ask about equipment you can see in a photo or that one of her saved places already lists. Once you have enough, just generate the workout.
 
-If she pushes back on a workout you already generated (wants it harder, easier, swap an exercise, more time, etc.), revise it and return a new full workout in the same JSON shape -- don't just describe the change in prose.
+If she pushes back on a workout you already generated, revise it and return a new full workout in the same JSON shape.
 
-Every workout you generate MUST include a dedicated 5-minute upper-abs block as part of "main" -- exercises that specifically target the upper abs (the area between the bust and the belly button: e.g. crunches, sit-ups, cable crunches, weighted crunches), clearly labeled as such. This is a hard requirement on every single workout regardless of the stated focus, because it's the one zone that actually shows in her high-rise pants.
+Every workout you generate MUST include a dedicated 5-minute upper-abs block as part of "main" (crunches, sit-ups, cable or weighted crunches), clearly labeled -- a hard requirement regardless of the stated focus, because it's the zone that shows in her high-rise pants.
+
+TIMED INTERVALS: when the workout uses intervals (e.g. "45 seconds on, 15 seconds off for 3 rounds"), write each such line explicitly with the WORK seconds, REST seconds, and number of ROUNDS, so a timer can be built from it.
+
+SAVING THE PLACE: if this workout was built from PHOTOS of a location that is NOT already one of her saved places, set "offer_save_place" to true and put the equipment you identified in "equipment" (a short list). The app will then offer to save the spot under a name she picks, so next time she won't need photos. If she used an already-saved place, set offer_save_place to false.${placeList}
 
 Respond with ONLY JSON, no other text, in exactly one of these two shapes:
 - If you need more information: {"type": "question", "question": string}
-- If you have enough to build (or revise) the workout: {"type": "workout", "title": string, "estimated_duration_min": number, "warmup": string[], "main": string[], "cooldown": string[], "notes": string}`;
+- If you have enough to build (or revise) the workout: {"type": "workout", "title": string, "estimated_duration_min": number, "warmup": string[], "main": string[], "cooldown": string[], "notes": string, "equipment": string[], "offer_save_place": boolean}`;
 
-  const messages = history.map((m) => ({ role: m.role, content: m.content }));
-  const result = await callClaudeMessages(messages, 800, system);
+  const messages: { role: "user" | "assistant"; content: any }[] = history.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+  // Attach any photos to the latest USER turn as image blocks so the model can
+  // read the equipment straight off the pictures.
+  if (images && images.length && messages.length) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        const textContent = typeof messages[i].content === "string" ? messages[i].content : "";
+        messages[i].content = [
+          ...images.map((data) => ({
+            type: "image",
+            source: { type: "base64", media_type: "image/jpeg", data },
+          })),
+          { type: "text", text: textContent || "Here's where I'm working out -- build me a workout from what you see." },
+        ];
+        break;
+      }
+    }
+  }
+  const result = await callClaudeMessages(messages, 1000, system);
   if (result.type === "workout") ensureAbsBlock(result);
   return result;
 }

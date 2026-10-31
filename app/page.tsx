@@ -274,6 +274,8 @@ export default function Dashboard() {
   const [burnedRange, setBurnedRange] = useState<RangeKey>("week");
   const [weightRange, setWeightRange] = useState<RangeKey>("month");
   const [bodyRange, setBodyRange] = useState<RangeKey>("month");
+  const [showAllTreatments, setShowAllTreatments] = useState(false);
+  const [showAllWorkouts, setShowAllWorkouts] = useState(false);
 
   // Edit/Delete state for the Today's Food list (Feature 2). editDate lets
   // Courtney move an entry logged under the wrong day to the right one --
@@ -852,7 +854,7 @@ export default function Dashboard() {
         {(data?.treatments?.length ?? 0) === 0 && (
           <div className="empty">No treatments yet. Say something like “NAD+ IV” in Log to add one.</div>
         )}
-        {data?.treatments.map((t) => (
+        {data?.treatments.slice(0, showAllTreatments ? undefined : 1).map((t) => (
           <div key={t.id} style={{ padding: "8px 0", borderBottom: "1px solid #f2f2f7" }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span>
@@ -868,12 +870,21 @@ export default function Dashboard() {
             )}
           </div>
         ))}
+        {(data?.treatments?.length ?? 0) > 1 && (
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowAllTreatments((v) => !v)}
+            style={{ padding: "6px 10px", fontSize: 13, marginTop: 10 }}
+          >
+            {showAllTreatments ? "Show less" : `Show all (${data?.treatments.length})`}
+          </button>
+        )}
       </div>
 
       <div className="card">
         <h2>Recent Workouts</h2>
         {(data?.workouts?.length ?? 0) === 0 && <div className="empty">No workouts logged yet.</div>}
-        {data?.workouts.slice(0, 8).map((w) => (
+        {data?.workouts.slice(0, showAllWorkouts ? undefined : 1).map((w) => (
           <div key={w.id} className="food-entry">
             <span>
               {workoutEmoji(w.workout_type)} {w.workout_type} <span className="subtle">· {w.date.slice(5)}</span>
@@ -888,6 +899,15 @@ export default function Dashboard() {
             </span>
           </div>
         ))}
+        {(data?.workouts?.length ?? 0) > 1 && (
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowAllWorkouts((v) => !v)}
+            style={{ padding: "6px 10px", fontSize: 13, marginTop: 10 }}
+          >
+            {showAllWorkouts ? "Show less" : `Show all (${data?.workouts.length})`}
+          </button>
+        )}
       </div>
     </div>
   );
